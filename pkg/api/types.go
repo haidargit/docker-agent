@@ -270,3 +270,15 @@ type SessionStatusResponse struct {
 	OutputTokens int64  `json:"output_tokens"`
 	NumMessages  int    `json:"num_messages"`
 }
+
+// SetSessionModelRequest is the body of PATCH /api/sessions/:id/model.
+// An empty Model clears the override and reverts to the agent's default.
+type SetSessionModelRequest struct {
+	Model string `json:"model"`
+}
+
+// SetSessionModelResponse is the response from PATCH /api/sessions/:id/model.
+type SetSessionModelResponse struct {
+	Agent string `json:"agent"`
+	Model string `json:"model,omitempty"`
+}
