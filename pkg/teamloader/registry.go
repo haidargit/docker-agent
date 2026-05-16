@@ -63,7 +63,7 @@ func NewDefaultToolsetRegistry() ToolsetRegistry {
 			"api":               createAPITool,
 			"a2a":               createA2ATool,
 			"lsp":               createLSPTool,
-			"user_prompt":       createUserPromptTool,
+			"user_prompt":       userprompt.CreateToolSet,
 			"openapi":           createOpenAPITool,
 			"model_picker":      createModelPickerTool,
 			"background_agents": createBackgroundAgentsTool,
@@ -472,10 +472,6 @@ func createLSPTool(ctx context.Context, toolset latest.Toolset, _ string, runCon
 	}
 
 	return tool, nil
-}
-
-func createUserPromptTool(_ context.Context, _ latest.Toolset, _ string, _ *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
-	return userprompt.NewUserPromptTool(), nil
 }
 
 func createOpenAPITool(ctx context.Context, toolset latest.Toolset, _ string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
