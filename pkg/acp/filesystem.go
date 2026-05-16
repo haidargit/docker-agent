@@ -32,7 +32,7 @@ func getSessionID(ctx context.Context) (string, bool) {
 // FilesystemToolset wraps a standard Tool and overrides read_file, write_file,
 // and edit_file to use the ACP connection for file operations
 type FilesystemToolset struct {
-	*filesystem.Tool
+	*filesystem.ToolSet
 
 	agent      *Agent
 	workingDir string
@@ -43,7 +43,7 @@ var _ tools.ToolSet = (*FilesystemToolset)(nil)
 // NewFilesystemToolset creates a new ACP-specific filesystem toolset
 func NewFilesystemToolset(agent *Agent, workingDir string, opts ...filesystem.Opt) *FilesystemToolset {
 	return &FilesystemToolset{
-		Tool:       filesystem.NewFilesystemTool(workingDir, opts...),
+		ToolSet:    filesystem.New(workingDir, opts...),
 		agent:      agent,
 		workingDir: workingDir,
 	}
@@ -51,7 +51,7 @@ func NewFilesystemToolset(agent *Agent, workingDir string, opts ...filesystem.Op
 
 // Tools returns the tool definitions with ACP-specific overrides
 func (t *FilesystemToolset) Tools(ctx context.Context) ([]tools.Tool, error) {
-	baseTools, err := t.Tool.Tools(ctx)
+	baseTools, err := t.ToolSet.Tools(ctx)
 	if err != nil {
 		return nil, err
 	}

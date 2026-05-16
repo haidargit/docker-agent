@@ -83,7 +83,7 @@ type Runtime interface {
 	PermissionsInfo() *PermissionsInfo
 
 	// CurrentAgentSkillsToolset returns the skills toolset for the current agent, or nil if skills are not enabled.
-	CurrentAgentSkillsToolset() *skills.Toolset
+	CurrentAgentSkillsToolset() *skills.ToolSet
 
 	// CurrentMCPPrompts returns MCP prompts available from the current agent's toolsets.
 	// Returns an empty map if no MCP prompts are available.
@@ -779,13 +779,13 @@ func (r *LocalRuntime) resolveSessionAgent(sess *session.Session) *agent.Agent {
 }
 
 // CurrentAgentSkillsToolset returns the skills toolset for the current agent, or nil if not enabled.
-func (r *LocalRuntime) CurrentAgentSkillsToolset() *skills.Toolset {
+func (r *LocalRuntime) CurrentAgentSkillsToolset() *skills.ToolSet {
 	a := r.CurrentAgent()
 	if a == nil {
 		return nil
 	}
 	for _, ts := range a.ToolSets() {
-		if st, ok := tools.As[*skills.Toolset](ts); ok {
+		if st, ok := tools.As[*skills.ToolSet](ts); ok {
 			return st
 		}
 	}

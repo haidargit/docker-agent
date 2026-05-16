@@ -21,7 +21,7 @@ import (
 // its final response is returned as the tool result.
 //
 // All skill-specific business rules (lookup, fork-mode validation, content
-// expansion) live in (*skills.Toolset).PrepareForkSubSession; this
+// expansion) live in (*skills.ToolSet).PrepareForkSubSession; this
 // handler keeps only the runtime-private orchestration that runForwarding
 // can't generalise — namely the optional model override that applies for
 // the sub-session's lifetime.

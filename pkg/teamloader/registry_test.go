@@ -269,8 +269,8 @@ func TestCreateLSPTool_WorkingDir_ReachesHandler(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, rawTool)
 
-	lspTool, ok := rawTool.(*lsp.Tool)
-	require.True(t, ok, "expected *lsp.Tool")
+	lspTool, ok := rawTool.(*lsp.ToolSet)
+	require.True(t, ok, "expected *lsp.ToolSet")
 	assert.Equal(t, customDir, lspTool.WorkingDir())
 }
 

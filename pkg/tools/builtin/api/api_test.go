@@ -21,9 +21,9 @@ import (
 // newAPIToolForTest constructs an APITool that bypasses SSRF dial-time
 // protection so tests can talk to httptest.NewServer (which binds to
 // 127.0.0.1). It is defined in a *_test.go file so it is not compiled
-// into release binaries. Production callers must use [NewAPITool].
-func newAPIToolForTest(config latest.APIToolConfig, expander *js.Expander) *Tool {
-	t := NewAPITool(config, expander)
+// into release binaries. Production callers must use [New].
+func newAPIToolForTest(config latest.APIToolConfig, expander *js.Expander) *ToolSet {
+	t := New(config, expander)
 	t.unsafe = true
 	return t
 }
@@ -158,7 +158,7 @@ func TestAPITool_IdentityHeaders(t *testing.T) {
 func TestAPITool_DefaultOutputSchema(t *testing.T) {
 	t.Parallel()
 
-	tool := NewAPITool(latest.APIToolConfig{
+	tool := New(latest.APIToolConfig{
 		Name:     "default-schema",
 		Method:   http.MethodGet,
 		Endpoint: "https://example.com/api",
@@ -184,7 +184,7 @@ func TestAPITool_CustomOutputSchema(t *testing.T) {
 		"required": []string{"first_name", "last_name"},
 	}
 
-	tool := NewAPITool(latest.APIToolConfig{
+	tool := New(latest.APIToolConfig{
 		Name:         "user-info",
 		Method:       http.MethodGet,
 		Endpoint:     "https://example.com/api/users/${id}",
@@ -223,7 +223,7 @@ func TestAPITool_RejectsLocalAddresses(t *testing.T) {
 	for _, target := range tests {
 		t.Run(target, func(t *testing.T) {
 			t.Parallel()
-			tool := NewAPITool(latest.APIToolConfig{
+			tool := New(latest.APIToolConfig{
 				Method:   http.MethodGet,
 				Endpoint: target,
 			}, testExpander())

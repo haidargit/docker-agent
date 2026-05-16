@@ -54,7 +54,7 @@ func (m *mockRuntime) SessionStore() session.Store { return nil }
 func (m *mockRuntime) Summarize(context.Context, *session.Session, string, EventSink) {
 }
 func (m *mockRuntime) PermissionsInfo() *PermissionsInfo { return nil }
-func (m *mockRuntime) CurrentAgentSkillsToolset() *skillstool.Toolset {
+func (m *mockRuntime) CurrentAgentSkillsToolset() *skillstool.ToolSet {
 	return nil
 }
 

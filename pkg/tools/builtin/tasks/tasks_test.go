@@ -12,10 +12,10 @@ import (
 	"github.com/docker/docker-agent/pkg/tools"
 )
 
-func newTestTasksTool(t *testing.T) *Tool {
+func newTestTasksTool(t *testing.T) *ToolSet {
 	t.Helper()
 	dir := t.TempDir()
-	return NewTasksTool(filepath.Join(dir, "tasks.json"))
+	return New(filepath.Join(dir, "tasks.json"))
 }
 
 func TestTasksTool_DisplayNames(t *testing.T) {
@@ -501,13 +501,13 @@ func TestTasksTool_Persistence(t *testing.T) {
 	dir := t.TempDir()
 	storagePath := filepath.Join(dir, "tasks.json")
 
-	tool1 := NewTasksTool(storagePath)
+	tool1 := New(storagePath)
 	r, err := tool1.createTask(t.Context(), CreateTaskArgs{Title: "Persistent"})
 	require.NoError(t, err)
 	var task Task
 	require.NoError(t, json.Unmarshal([]byte(r.Output), &task))
 
-	tool2 := NewTasksTool(storagePath)
+	tool2 := New(storagePath)
 	result, err := tool2.getTask(t.Context(), GetTaskArgs{ID: task.ID})
 	require.NoError(t, err)
 	assert.False(t, result.IsError)

@@ -22,13 +22,13 @@ type Multiplexer struct {
 // optionally-wrapped ToolSet (used for tool enumeration, so that per-toolset
 // config like tool filters, instructions, or toon wrappers are respected).
 type Backend struct {
-	LSP     *Tool
+	LSP     *ToolSet
 	Toolset tools.ToolSet
 }
 
 // lspRouteTarget pairs a backend with the tool handler it produced for a given tool name.
 type lspRouteTarget struct {
-	lsp     *Tool
+	lsp     *ToolSet
 	handler tools.ToolHandler
 }
 

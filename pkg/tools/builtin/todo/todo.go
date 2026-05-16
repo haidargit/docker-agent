@@ -26,10 +26,10 @@ func CreateToolSet(toolset latest.Toolset) (tools.ToolSet, error) {
 		return newSharedTodoTool(), nil
 	}
 
-	return newTool(), nil
+	return New(), nil
 }
 
-type tool struct {
+type ToolSet struct {
 	handler *todoHandler
 }
 
@@ -135,7 +135,7 @@ func (s *MemoryTodoStorage) Clear(_ context.Context) {
 }
 
 // Option is a functional option for configuring a Tool.
-type Option func(*tool)
+type Option func(*ToolSet)
 
 // WithStorage sets a custom storage implementation for the Tool.
 // The provided storage must not be nil.
@@ -143,7 +143,7 @@ func WithStorage(storage Storage) Option {
 	if storage == nil {
 		panic("todo: storage must not be nil")
 	}
-	return func(t *tool) {
+	return func(t *ToolSet) {
 		t.handler.storage = storage
 	}
 }
@@ -153,10 +153,10 @@ type todoHandler struct {
 	nextID  atomic.Int64
 }
 
-var newSharedTodoTool = sync.OnceValue(func() *tool { return newTool() })
+var newSharedTodoTool = sync.OnceValue(func() *ToolSet { return New() })
 
-func newTool(opts ...Option) *tool {
-	t := &tool{
+func New(opts ...Option) *ToolSet {
+	t := &ToolSet{
 		handler: &todoHandler{
 			storage: NewMemoryTodoStorage(),
 		},
@@ -167,7 +167,7 @@ func newTool(opts ...Option) *tool {
 	return t
 }
 
-func (t *tool) Instructions() string {
+func (t *ToolSet) Instructions() string {
 	return `## Todo Tools
 
 Track task progress with todos:
@@ -292,7 +292,7 @@ func (h *todoHandler) listTodos(ctx context.Context, _ tools.ToolCall) (*tools.T
 	return h.jsonResult(ctx, out)
 }
 
-func (t *tool) Tools(context.Context) ([]tools.Tool, error) {
+func (t *ToolSet) Tools(context.Context) ([]tools.Tool, error) {
 	return []tools.Tool{
 		{
 			Name:         ToolNameCreateTodo,

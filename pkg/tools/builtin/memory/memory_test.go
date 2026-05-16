@@ -46,7 +46,7 @@ func (m *MockDB) UpdateMemory(ctx context.Context, memory database.UserMemory) e
 
 func TestMemoryTool_Instructions(t *testing.T) {
 	manager := new(MockDB)
-	tool := NewMemoryTool(manager)
+	tool := New(manager)
 
 	instructions := tool.Instructions()
 	assert.Contains(t, instructions, "Memory Tools")
@@ -57,7 +57,7 @@ func TestMemoryTool_Instructions(t *testing.T) {
 
 func TestMemoryTool_DisplayNames(t *testing.T) {
 	manager := new(MockDB)
-	tool := NewMemoryTool(manager)
+	tool := New(manager)
 
 	all, err := tool.Tools(t.Context())
 	require.NoError(t, err)
@@ -70,7 +70,7 @@ func TestMemoryTool_DisplayNames(t *testing.T) {
 
 func TestMemoryTool_HandleAddMemory(t *testing.T) {
 	manager := new(MockDB)
-	tool := NewMemoryTool(manager)
+	tool := New(manager)
 
 	manager.On("AddMemory", mock.Anything, mock.MatchedBy(func(memory database.UserMemory) bool {
 		return memory.Memory == "test memory"
@@ -86,7 +86,7 @@ func TestMemoryTool_HandleAddMemory(t *testing.T) {
 
 func TestMemoryTool_HandleAddMemoryWithCategory(t *testing.T) {
 	manager := new(MockDB)
-	tool := NewMemoryTool(manager)
+	tool := New(manager)
 
 	manager.On("AddMemory", mock.Anything, mock.MatchedBy(func(memory database.UserMemory) bool {
 		return memory.Memory == "prefers dark mode" && memory.Category == "preference"
@@ -103,7 +103,7 @@ func TestMemoryTool_HandleAddMemoryWithCategory(t *testing.T) {
 
 func TestMemoryTool_HandleGetMemories(t *testing.T) {
 	manager := new(MockDB)
-	tool := NewMemoryTool(manager)
+	tool := New(manager)
 
 	memories := []database.UserMemory{
 		{
@@ -133,7 +133,7 @@ func TestMemoryTool_HandleGetMemories(t *testing.T) {
 
 func TestMemoryTool_HandleDeleteMemory(t *testing.T) {
 	manager := new(MockDB)
-	tool := NewMemoryTool(manager)
+	tool := New(manager)
 
 	manager.On("DeleteMemory", mock.Anything, mock.MatchedBy(func(memory database.UserMemory) bool {
 		return memory.ID == "1"
@@ -150,7 +150,7 @@ func TestMemoryTool_HandleDeleteMemory(t *testing.T) {
 
 func TestMemoryTool_HandleSearchMemories(t *testing.T) {
 	manager := new(MockDB)
-	tool := NewMemoryTool(manager)
+	tool := New(manager)
 
 	memories := []database.UserMemory{
 		{
@@ -179,7 +179,7 @@ func TestMemoryTool_HandleSearchMemories(t *testing.T) {
 
 func TestMemoryTool_HandleUpdateMemory(t *testing.T) {
 	manager := new(MockDB)
-	tool := NewMemoryTool(manager)
+	tool := New(manager)
 
 	manager.On("UpdateMemory", mock.Anything, mock.MatchedBy(func(memory database.UserMemory) bool {
 		return memory.ID == "42" && memory.Memory == "updated content" && memory.Category == "fact"
@@ -196,7 +196,7 @@ func TestMemoryTool_HandleUpdateMemory(t *testing.T) {
 }
 
 func TestMemoryTool_ToolCount(t *testing.T) {
-	tool := NewMemoryTool(nil)
+	tool := New(nil)
 
 	allTools, err := tool.Tools(t.Context())
 	require.NoError(t, err)
@@ -204,7 +204,7 @@ func TestMemoryTool_ToolCount(t *testing.T) {
 }
 
 func TestMemoryTool_OutputSchema(t *testing.T) {
-	tool := NewMemoryTool(nil)
+	tool := New(nil)
 
 	allTools, err := tool.Tools(t.Context())
 	require.NoError(t, err)
@@ -216,7 +216,7 @@ func TestMemoryTool_OutputSchema(t *testing.T) {
 }
 
 func TestMemoryTool_ParametersAreObjects(t *testing.T) {
-	tool := NewMemoryTool(nil)
+	tool := New(nil)
 
 	allTools, err := tool.Tools(t.Context())
 	require.NoError(t, err)

@@ -49,7 +49,7 @@ func run(ctx context.Context) error {
 		"You are a human, with feelings and emotions.",
 		agent.WithModel(llm),
 		agent.WithSubAgents(child),
-		agent.WithToolSets(transfertask.NewTransferTaskTool()),
+		agent.WithToolSets(transfertask.New()),
 	)
 	rt, err := runtime.New(team.New(team.WithAgents(root, child)))
 	if err != nil {

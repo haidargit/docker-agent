@@ -28,7 +28,7 @@ func TestDeferredToolset_SearchTool(t *testing.T) {
 		},
 	}
 
-	dt := NewDeferredToolset()
+	dt := New()
 	dt.AddSource(mockTools, true, nil)
 	err := dt.Start(ctx)
 	require.NoError(t, err)
@@ -65,7 +65,7 @@ func TestDeferredToolset_AddTool(t *testing.T) {
 		},
 	}
 
-	dt := NewDeferredToolset()
+	dt := New()
 	dt.AddSource(mockTools, true, nil)
 	err := dt.Start(ctx)
 	require.NoError(t, err)

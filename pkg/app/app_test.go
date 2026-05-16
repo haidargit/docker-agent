@@ -60,7 +60,7 @@ func (m *mockRuntime) SessionStore() session.Store { return m.store }
 func (m *mockRuntime) Summarize(ctx context.Context, sess *session.Session, additionalPrompt string, events runtime.EventSink) {
 }
 func (m *mockRuntime) PermissionsInfo() *runtime.PermissionsInfo { return nil }
-func (m *mockRuntime) CurrentAgentSkillsToolset() *skillstool.Toolset {
+func (m *mockRuntime) CurrentAgentSkillsToolset() *skillstool.ToolSet {
 	return nil
 }
 

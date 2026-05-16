@@ -30,28 +30,28 @@ func CreateScriptToolSet(ctx context.Context, toolset latest.Toolset, runConfig 
 		return nil, fmt.Errorf("failed to expand the tool's environment variables: %w", err)
 	}
 	env = append(env, os.Environ()...)
-	return NewScriptShellTool(toolset.Shell, env)
+	return NewScript(toolset.Shell, env)
 }
 
-type ScriptShellTool struct {
+type ScriptToolSet struct {
 	shellTools map[string]latest.ScriptShellToolConfig
 	env        []string
 }
 
 // Verify interface compliance
 var (
-	_ tools.ToolSet      = (*ScriptShellTool)(nil)
-	_ tools.Instructable = (*ScriptShellTool)(nil)
+	_ tools.ToolSet      = (*ScriptToolSet)(nil)
+	_ tools.Instructable = (*ScriptToolSet)(nil)
 )
 
-func NewScriptShellTool(shellTools map[string]latest.ScriptShellToolConfig, env []string) (*ScriptShellTool, error) {
+func NewScript(shellTools map[string]latest.ScriptShellToolConfig, env []string) (*ScriptToolSet, error) {
 	for toolName, tool := range shellTools {
 		if err := validateConfig(toolName, tool); err != nil {
 			return nil, err
 		}
 	}
 
-	return &ScriptShellTool{
+	return &ScriptToolSet{
 		shellTools: shellTools,
 		env:        env,
 	}, nil
@@ -88,7 +88,7 @@ func validateConfig(toolName string, tool latest.ScriptShellToolConfig) error {
 	return nil
 }
 
-func (t *ScriptShellTool) Instructions() string {
+func (t *ScriptToolSet) Instructions() string {
 	var sb strings.Builder
 	sb.WriteString("## Custom Shell Tools\n\n")
 
@@ -114,7 +114,7 @@ func (t *ScriptShellTool) Instructions() string {
 	return sb.String()
 }
 
-func (t *ScriptShellTool) Tools(context.Context) ([]tools.Tool, error) {
+func (t *ScriptToolSet) Tools(context.Context) ([]tools.Tool, error) {
 	var toolsList []tools.Tool
 
 	for name, toolConfig := range t.shellTools {
@@ -147,7 +147,7 @@ func (t *ScriptShellTool) Tools(context.Context) ([]tools.Tool, error) {
 	return toolsList, nil
 }
 
-func (t *ScriptShellTool) execute(ctx context.Context, toolConfig *latest.ScriptShellToolConfig, toolCall tools.ToolCall) (*tools.ToolCallResult, error) {
+func (t *ScriptToolSet) execute(ctx context.Context, toolConfig *latest.ScriptShellToolConfig, toolCall tools.ToolCall) (*tools.ToolCallResult, error) {
 	var params map[string]any
 	if toolCall.Function.Arguments != "" {
 		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &params); err != nil {

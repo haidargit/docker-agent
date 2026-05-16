@@ -17,7 +17,7 @@ func TestLSPTool_StartFailureWhenServerMissing(t *testing.T) {
 	t.Parallel()
 
 	// Use a binary path that surely does not exist anywhere on PATH.
-	tool := NewLSPTool("docker-agent-lsp-does-not-exist", nil, nil, t.TempDir())
+	tool := New("docker-agent-lsp-does-not-exist", nil, nil, t.TempDir())
 	err := tool.Start(t.Context())
 	require.Error(t, err)
 	assert.ErrorIs(t, err, lifecycle.ErrServerUnavailable)
@@ -28,7 +28,7 @@ func TestLSPTool_StartFailureWhenServerMissing(t *testing.T) {
 func TestLSPTool_StopBeforeStart(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("docker-agent-lsp-does-not-exist", nil, nil, t.TempDir())
+	tool := New("docker-agent-lsp-does-not-exist", nil, nil, t.TempDir())
 	require.NoError(t, tool.Stop(t.Context()))
 	require.NoError(t, tool.Stop(t.Context()))
 }
@@ -40,7 +40,7 @@ func TestLSPTool_StopBeforeStart(t *testing.T) {
 func TestLSPTool_SupervisorRetryAfterFailure(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("docker-agent-lsp-does-not-exist", nil, nil, t.TempDir())
+	tool := New("docker-agent-lsp-does-not-exist", nil, nil, t.TempDir())
 
 	// First attempt: Start fails because the binary is missing.
 	err := tool.Start(t.Context())

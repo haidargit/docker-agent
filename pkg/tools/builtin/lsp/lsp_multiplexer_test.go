@@ -12,11 +12,11 @@ import (
 )
 
 // newTestMultiplexer creates a multiplexer with a Go and Python backend.
-func newTestMultiplexer() (*Multiplexer, *Tool) {
-	goTool := NewLSPTool("gopls", nil, nil, "/tmp")
+func newTestMultiplexer() (*Multiplexer, *ToolSet) {
+	goTool := New("gopls", nil, nil, "/tmp")
 	goTool.SetFileTypes([]string{".go", ".mod"})
 
-	pyTool := NewLSPTool("pyright", nil, nil, "/tmp")
+	pyTool := New("pyright", nil, nil, "/tmp")
 	pyTool.SetFileTypes([]string{".py"})
 
 	mux := NewLSPMultiplexer([]Backend{

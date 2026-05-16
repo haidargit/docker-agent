@@ -15,14 +15,14 @@ import (
 
 // findModelPickerTool returns the Tool from the current agent's
 // toolsets, or nil if the agent has no model_picker configured.
-func (r *LocalRuntime) findModelPickerTool() *modelpicker.Tool {
+func (r *LocalRuntime) findModelPickerTool() *modelpicker.ToolSet {
 	currentName := r.CurrentAgentName()
 	a, err := r.team.Agent(currentName)
 	if err != nil {
 		return nil
 	}
 	for _, ts := range a.ToolSets() {
-		if mpt, ok := tools.As[*modelpicker.Tool](ts); ok {
+		if mpt, ok := tools.As[*modelpicker.ToolSet](ts); ok {
 			return mpt
 		}
 	}

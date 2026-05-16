@@ -21,7 +21,7 @@ import (
 	"github.com/docker/docker-agent/pkg/useragent"
 )
 
-type Tool struct {
+type ToolSet struct {
 	config   latest.APIToolConfig
 	expander *js.Expander
 
@@ -32,11 +32,11 @@ type Tool struct {
 
 // Verify interface compliance
 var (
-	_ tools.ToolSet      = (*Tool)(nil)
-	_ tools.Instructable = (*Tool)(nil)
+	_ tools.ToolSet      = (*ToolSet)(nil)
+	_ tools.Instructable = (*ToolSet)(nil)
 )
 
-func (t *Tool) callTool(ctx context.Context, toolCall tools.ToolCall) (*tools.ToolCallResult, error) {
+func (t *ToolSet) callTool(ctx context.Context, toolCall tools.ToolCall) (*tools.ToolCallResult, error) {
 	client := httpclient.NewSafeClient(30*time.Second, t.unsafe)
 
 	endpoint := t.config.Endpoint
@@ -100,21 +100,21 @@ func CreateToolSet(ctx context.Context, toolset latest.Toolset, runConfig *confi
 	toolset.APIConfig.Endpoint = expander.Expand(ctx, toolset.APIConfig.Endpoint, nil)
 	toolset.APIConfig.Headers = expander.ExpandMap(ctx, toolset.APIConfig.Headers)
 
-	return NewAPITool(toolset.APIConfig, expander), nil
+	return New(toolset.APIConfig, expander), nil
 }
 
-func NewAPITool(apiConfig latest.APIToolConfig, expander *js.Expander) *Tool {
-	return &Tool{
+func New(apiConfig latest.APIToolConfig, expander *js.Expander) *ToolSet {
+	return &ToolSet{
 		config:   apiConfig,
 		expander: expander,
 	}
 }
 
-func (t *Tool) Instructions() string {
+func (t *ToolSet) Instructions() string {
 	return t.config.Instruction
 }
 
-func (t *Tool) Tools(context.Context) ([]tools.Tool, error) {
+func (t *ToolSet) Tools(context.Context) ([]tools.Tool, error) {
 	inputSchema, err := tools.SchemaToMap(map[string]any{
 		"type":       "object",
 		"properties": t.config.Args,

@@ -20,14 +20,14 @@ import (
 // newFetchToolForTest constructs a FetchTool that bypasses SSRF dial-time
 // protection so tests can talk to httptest.NewServer (which binds to
 // 127.0.0.1). It is defined in a *_test.go file so it is not compiled
-// into release binaries. Production callers must use [NewFetchTool],
+// into release binaries. Production callers must use [New],
 // which refuses non-public addresses by default.
 //
 // The helper prepends [WithAllowPrivateIPs](true) to opts so explicit
 // caller options still take precedence (a later option overrides an
 // earlier one).
-func newFetchToolForTest(opts ...ToolOption) *Tool {
-	return NewFetchTool(append([]ToolOption{WithAllowPrivateIPs(true)}, opts...)...)
+func newFetchToolForTest(opts ...ToolOption) *ToolSet {
+	return New(append([]ToolOption{WithAllowPrivateIPs(true)}, opts...)...)
 }
 
 func TestFetchToolWithOptions(t *testing.T) {
@@ -860,7 +860,7 @@ func TestFetch_Headers_StrippedOnRobotsCrossHostRedirect(t *testing.T) {
 }
 
 // TestFetch_DefaultRefusesNonPublicAddresses pins the security-relevant
-// default: an out-of-the-box [NewFetchTool] (no WithAllowPrivateIPs)
+// default: an out-of-the-box [New] (no WithAllowPrivateIPs)
 // must refuse to dial loopback, RFC1918, link-local incl. cloud
 // metadata, multicast and the unspecified address. These are checked
 // after DNS resolution, so a public hostname that resolves to a private
@@ -878,7 +878,7 @@ func TestFetch_DefaultRefusesNonPublicAddresses(t *testing.T) {
 	for _, target := range tests {
 		t.Run(target, func(t *testing.T) {
 			t.Parallel()
-			tool := NewFetchTool() // production constructor, no opt-in
+			tool := New() // production constructor, no opt-in
 			result, err := tool.handler.CallTool(t.Context(), ToolArgs{
 				URLs:   []string{target},
 				Format: "text",
@@ -902,7 +902,7 @@ func TestFetch_AllowPrivateIPsRestoresLegacyBehaviour(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	tool := NewFetchTool(WithAllowPrivateIPs(true))
+	tool := New(WithAllowPrivateIPs(true))
 	result, err := tool.handler.CallTool(t.Context(), ToolArgs{
 		URLs:   []string{server.URL},
 		Format: "text",

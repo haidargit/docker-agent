@@ -9,10 +9,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewLSPTool(t *testing.T) {
+func TestNew(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("gopls", []string{}, nil, "/tmp")
+	tool := New("gopls", []string{}, nil, "/tmp")
 	require.NotNil(t, tool)
 	require.NotNil(t, tool.handler)
 }
@@ -20,7 +20,7 @@ func TestNewLSPTool(t *testing.T) {
 func TestLSPTool_Tools(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("gopls", nil, nil, "/tmp")
+	tool := New("gopls", nil, nil, "/tmp")
 	tools, err := tool.Tools(t.Context())
 	require.NoError(t, err)
 
@@ -59,7 +59,7 @@ func TestLSPTool_Tools(t *testing.T) {
 func TestLSPTool_ToolDescriptions(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("gopls", nil, nil, "/tmp")
+	tool := New("gopls", nil, nil, "/tmp")
 	tools, err := tool.Tools(t.Context())
 	require.NoError(t, err)
 
@@ -76,7 +76,7 @@ func TestLSPTool_ToolDescriptions(t *testing.T) {
 func TestLSPTool_Instructions(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("gopls", nil, nil, "/tmp")
+	tool := New("gopls", nil, nil, "/tmp")
 	instructions := tool.Instructions()
 
 	// Should mention the tools are stateless
@@ -250,7 +250,7 @@ func TestFormatHoverContents(t *testing.T) {
 func TestLSPHandler_NotInitialized_AutoInitializes(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("nonexistent-lsp-server", nil, nil, "/tmp")
+	tool := New("nonexistent-lsp-server", nil, nil, "/tmp")
 
 	// Test that operations attempt auto-initialization
 	// (will fail because the server doesn't exist, but should try)
@@ -270,7 +270,7 @@ func TestLSPHandler_NotInitialized_AutoInitializes(t *testing.T) {
 func TestLSPHandler_GetDiagnostics_NoDiagnostics(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("gopls", nil, nil, "/tmp")
+	tool := New("gopls", nil, nil, "/tmp")
 	// Mark as initialized to test the diagnostics retrieval path
 	tool.handler.initialized.Store(true)
 	// Pretend we have a running server by setting a non-nil cmd
@@ -291,7 +291,7 @@ func TestLSPHandler_GetDiagnostics_NoDiagnostics(t *testing.T) {
 func TestLSPHandler_GetDiagnostics_WithDiagnostics(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("gopls", nil, nil, "/tmp")
+	tool := New("gopls", nil, nil, "/tmp")
 	// Mark as initialized to test the diagnostics retrieval path
 	tool.handler.initialized.Store(true)
 	// Pretend we have a running server
@@ -318,7 +318,7 @@ func TestLSPHandler_GetDiagnostics_WithDiagnostics(t *testing.T) {
 func TestProcessNotification_Diagnostics(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("gopls", nil, nil, "/tmp")
+	tool := New("gopls", nil, nil, "/tmp")
 
 	// Create a diagnostic notification
 	notification := map[string]any{
@@ -356,7 +356,7 @@ func TestProcessNotification_Diagnostics(t *testing.T) {
 func TestLSPHandler_Stop_NotStarted(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("gopls", nil, nil, "/tmp")
+	tool := New("gopls", nil, nil, "/tmp")
 	ctx := t.Context()
 
 	// Should not error when stopping a non-started server
@@ -410,13 +410,13 @@ func TestLSPTool_HandlesFile(t *testing.T) {
 	t.Parallel()
 
 	// Without file type filter (handles all)
-	tool := NewLSPTool("gopls", nil, nil, "/tmp")
+	tool := New("gopls", nil, nil, "/tmp")
 	assert.True(t, tool.HandlesFile("main.go"))
 	assert.True(t, tool.HandlesFile("app.py"))
 	assert.True(t, tool.HandlesFile("anything.txt"))
 
 	// With file type filter
-	toolFiltered := NewLSPTool("gopls", nil, nil, "/tmp")
+	toolFiltered := New("gopls", nil, nil, "/tmp")
 	toolFiltered.SetFileTypes([]string{".go", ".mod"})
 	assert.True(t, toolFiltered.HandlesFile("main.go"))
 	assert.True(t, toolFiltered.HandlesFile("go.mod"))
@@ -424,7 +424,7 @@ func TestLSPTool_HandlesFile(t *testing.T) {
 	assert.False(t, toolFiltered.HandlesFile("index.js"))
 
 	// Without leading dot in filter
-	toolNoDot := NewLSPTool("gopls", nil, nil, "/tmp")
+	toolNoDot := New("gopls", nil, nil, "/tmp")
 	toolNoDot.SetFileTypes([]string{"go", "py"})
 	assert.True(t, toolNoDot.HandlesFile("main.go"))
 	assert.True(t, toolNoDot.HandlesFile("app.py"))
@@ -442,7 +442,7 @@ func TestPathToURI(t *testing.T) {
 func TestLSPHandler_IsFileOpen(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("gopls", nil, nil, "/tmp")
+	tool := New("gopls", nil, nil, "/tmp")
 
 	// Initially no files are open
 	assert.False(t, tool.handler.isFileOpen("file:///test.go"))
@@ -459,7 +459,7 @@ func TestLSPHandler_IsFileOpen(t *testing.T) {
 func TestLSPHandler_DiagnosticsVersion(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("gopls", nil, nil, "/tmp")
+	tool := New("gopls", nil, nil, "/tmp")
 
 	// Initial version should be 0
 	assert.Equal(t, int64(0), tool.handler.diagnosticsVersion.Load())
@@ -751,7 +751,7 @@ func TestCapabilityStatus(t *testing.T) {
 func TestLSPHandler_Workspace(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("gopls", []string{"-remote=auto"}, nil, "/tmp/project")
+	tool := New("gopls", []string{"-remote=auto"}, nil, "/tmp/project")
 	tool.SetFileTypes([]string{".go", ".mod"})
 
 	// Mark as initialized and set server info/capabilities

@@ -51,7 +51,7 @@ func (m *mockRuntime) ResumeElicitation(_ context.Context, action tools.Elicitat
 func (m *mockRuntime) SessionStore() session.Store                                            { return nil }
 func (m *mockRuntime) Summarize(context.Context, *session.Session, string, runtime.EventSink) {}
 func (m *mockRuntime) PermissionsInfo() *runtime.PermissionsInfo                              { return nil }
-func (m *mockRuntime) CurrentAgentSkillsToolset() *skillstool.Toolset                         { return nil }
+func (m *mockRuntime) CurrentAgentSkillsToolset() *skillstool.ToolSet                         { return nil }
 func (m *mockRuntime) CurrentMCPPrompts(context.Context) map[string]mcptools.PromptInfo {
 	return nil
 }

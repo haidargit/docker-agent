@@ -221,7 +221,7 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
 			loadedSkills := skills.Load(agentConfig.Skills.Sources)
 			loadedSkills = filterSkillsByName(loadedSkills, agentConfig.Skills.Include)
 			if len(loadedSkills) > 0 {
-				agentTools = append(agentTools, skillstool.NewSkillsToolset(loadedSkills, runConfig.WorkingDir))
+				agentTools = append(agentTools, skillstool.New(loadedSkills, runConfig.WorkingDir))
 			}
 		}
 
@@ -414,7 +414,7 @@ func getToolsForAgent(ctx context.Context, a *latest.AgentConfig, parentDir stri
 		lspBackends []lsp.Backend
 	)
 
-	deferredToolset := deferred.NewDeferredToolset()
+	deferredToolset := deferred.New()
 
 	for i := range a.Toolsets {
 		toolset := a.Toolsets[i]
@@ -448,7 +448,7 @@ func getToolsForAgent(ctx context.Context, a *latest.AgentConfig, parentDir stri
 		// Instead of adding them individually (which causes duplicate tool names),
 		// they are combined into a single Multiplexer after the loop.
 		if toolset.Type == "lsp" {
-			if lspTool, ok := tool.(*lsp.Tool); ok {
+			if lspTool, ok := tool.(*lsp.ToolSet); ok {
 				lspBackends = append(lspBackends, lsp.Backend{LSP: lspTool, Toolset: wrapped})
 				continue
 			}
@@ -472,10 +472,10 @@ func getToolsForAgent(ctx context.Context, a *latest.AgentConfig, parentDir stri
 	}
 
 	if len(a.SubAgents) > 0 {
-		toolSets = append(toolSets, transfertask.NewTransferTaskTool())
+		toolSets = append(toolSets, transfertask.New())
 	}
 	if len(a.Handoffs) > 0 {
-		toolSets = append(toolSets, handoff.NewHandoffTool())
+		toolSets = append(toolSets, handoff.New())
 	}
 
 	// Wrap all tools in a single Code Mode toolset.

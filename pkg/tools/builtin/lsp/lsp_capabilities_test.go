@@ -111,7 +111,7 @@ func TestIsProviderEnabled(t *testing.T) {
 func TestSetToolsChangedHandler_RegisterAndFire(t *testing.T) {
 	t.Parallel()
 
-	tool := NewLSPTool("nope", nil, nil, t.TempDir())
+	tool := New("nope", nil, nil, t.TempDir())
 	called := 0
 	tool.SetToolsChangedHandler(func() { called++ })
 

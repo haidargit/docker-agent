@@ -29,7 +29,7 @@ func TestRAGTool_ToolName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tool := &Tool{
+			tool := &ToolSet{
 				toolName: tt.toolName,
 				manager:  nil,
 			}
@@ -44,7 +44,7 @@ func TestRAGTool_ToolName(t *testing.T) {
 }
 
 func TestRAGTool_DefaultDescription(t *testing.T) {
-	tool := &Tool{
+	tool := &ToolSet{
 		toolName: "test_docs",
 		manager:  nil,
 	}

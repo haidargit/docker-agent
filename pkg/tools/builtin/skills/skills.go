@@ -18,31 +18,31 @@ const (
 )
 
 var (
-	_ tools.ToolSet      = (*Toolset)(nil)
-	_ tools.Instructable = (*Toolset)(nil)
+	_ tools.ToolSet      = (*ToolSet)(nil)
+	_ tools.Instructable = (*ToolSet)(nil)
 )
 
-// Toolset provides the read_skill and read_skill_file tools that let an
+// ToolSet provides the read_skill and read_skill_file tools that let an
 // agent load skill content and supporting resources by name. It hides whether
 // a skill is local or remote — the agent just sees a name and description.
-type Toolset struct {
+type ToolSet struct {
 	skills     []skills.Skill
 	workingDir string
 }
 
-func NewSkillsToolset(loadedSkills []skills.Skill, workingDir string) *Toolset {
-	return &Toolset{
+func New(loadedSkills []skills.Skill, workingDir string) *ToolSet {
+	return &ToolSet{
 		skills:     loadedSkills,
 		workingDir: workingDir,
 	}
 }
 
 // Skills returns the loaded skills (used by the app layer for slash commands).
-func (s *Toolset) Skills() []skills.Skill {
+func (s *ToolSet) Skills() []skills.Skill {
 	return s.skills
 }
 
-func (s *Toolset) findSkill(name string) *skills.Skill {
+func (s *ToolSet) findSkill(name string) *skills.Skill {
 	for i := range s.skills {
 		if s.skills[i].Name == name {
 			return &s.skills[i]
@@ -52,7 +52,7 @@ func (s *Toolset) findSkill(name string) *skills.Skill {
 }
 
 // FindSkill returns the skill with the given name, or nil if not found.
-func (s *Toolset) FindSkill(name string) *skills.Skill {
+func (s *ToolSet) FindSkill(name string) *skills.Skill {
 	return s.findSkill(name)
 }
 
@@ -60,7 +60,7 @@ func (s *Toolset) FindSkill(name string) *skills.Skill {
 // For local skills, it expands any !`command` patterns in the content by
 // executing the commands and replacing the patterns with their stdout output.
 // Command expansion is disabled for remote skills to prevent arbitrary code execution.
-func (s *Toolset) ReadSkillContent(ctx context.Context, name string) (string, error) {
+func (s *ToolSet) ReadSkillContent(ctx context.Context, name string) (string, error) {
 	skill := s.findSkill(name)
 	if skill == nil {
 		return "", fmt.Errorf("skill %q not found", name)
@@ -80,7 +80,7 @@ func (s *Toolset) ReadSkillContent(ctx context.Context, name string) (string, er
 
 // ReadSkillFile returns the content of a supporting file within a skill.
 // The path is relative to the skill's base directory (e.g. "references/FORMS.md").
-func (s *Toolset) ReadSkillFile(skillName, relativePath string) (string, error) {
+func (s *ToolSet) ReadSkillFile(skillName, relativePath string) (string, error) {
 	skill := s.findSkill(skillName)
 	if skill == nil {
 		return "", fmt.Errorf("skill %q not found", skillName)
@@ -134,7 +134,7 @@ type readSkillFileArgs struct {
 	Path      string `json:"path" jsonschema:"The relative path to the file within the skill (e.g. references/FORMS.md)"`
 }
 
-func (s *Toolset) handleReadSkill(ctx context.Context, args readSkillArgs) (*tools.ToolCallResult, error) {
+func (s *ToolSet) handleReadSkill(ctx context.Context, args readSkillArgs) (*tools.ToolCallResult, error) {
 	content, err := s.ReadSkillContent(ctx, args.Name)
 	if err != nil {
 		return tools.ResultError(err.Error()), nil
@@ -142,7 +142,7 @@ func (s *Toolset) handleReadSkill(ctx context.Context, args readSkillArgs) (*too
 	return tools.ResultSuccess(content), nil
 }
 
-func (s *Toolset) handleReadSkillFile(_ context.Context, args readSkillFileArgs) (*tools.ToolCallResult, error) {
+func (s *ToolSet) handleReadSkillFile(_ context.Context, args readSkillFileArgs) (*tools.ToolCallResult, error) {
 	content, err := s.ReadSkillFile(args.SkillName, args.Path)
 	if err != nil {
 		return tools.ResultError(err.Error()), nil
@@ -151,7 +151,7 @@ func (s *Toolset) handleReadSkillFile(_ context.Context, args readSkillFileArgs)
 }
 
 // hasFiles reports whether any loaded skill has supporting files beyond SKILL.md.
-func (s *Toolset) hasFiles() bool {
+func (s *ToolSet) hasFiles() bool {
 	for _, skill := range s.skills {
 		if len(skill.Files) > 1 {
 			return true
@@ -161,7 +161,7 @@ func (s *Toolset) hasFiles() bool {
 }
 
 // hasForkSkills reports whether any loaded skill uses context: fork.
-func (s *Toolset) hasForkSkills() bool {
+func (s *ToolSet) hasForkSkills() bool {
 	for i := range s.skills {
 		if s.skills[i].IsFork() {
 			return true
@@ -170,7 +170,7 @@ func (s *Toolset) hasForkSkills() bool {
 	return false
 }
 
-func (s *Toolset) Instructions() string {
+func (s *ToolSet) Instructions() string {
 	if len(s.skills) == 0 {
 		return ""
 	}
@@ -258,7 +258,7 @@ type PreparedSkillFork struct {
 // skill not configured for fork mode, content read failure). The caller is
 // responsible for the runtime-specific orchestration (sub-session creation,
 // tracing, event forwarding).
-func (s *Toolset) PrepareForkSubSession(ctx context.Context, args RunSkillArgs) (*PreparedSkillFork, *tools.ToolCallResult) {
+func (s *ToolSet) PrepareForkSubSession(ctx context.Context, args RunSkillArgs) (*PreparedSkillFork, *tools.ToolCallResult) {
 	skill := s.findSkill(args.Name)
 	if skill == nil {
 		return nil, tools.ResultError(fmt.Sprintf("skill %q not found", args.Name))
@@ -284,7 +284,7 @@ func (s *Toolset) PrepareForkSubSession(ctx context.Context, args RunSkillArgs) 
 	}, nil
 }
 
-func (s *Toolset) Tools(context.Context) ([]tools.Tool, error) {
+func (s *ToolSet) Tools(context.Context) ([]tools.Tool, error) {
 	if len(s.skills) == 0 {
 		return nil, nil
 	}

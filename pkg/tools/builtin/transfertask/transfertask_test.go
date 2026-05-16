@@ -11,12 +11,12 @@ import (
 )
 
 func TestNewTaskTool(t *testing.T) {
-	tool := NewTransferTaskTool()
+	tool := New()
 	assert.NotNil(t, tool)
 }
 
 func TestTaskTool_Instructions(t *testing.T) {
-	tool := NewTransferTaskTool()
+	tool := New()
 
 	// Tool doesn't implement Instructable
 	_, ok := any(tool).(tools.Instructable)
@@ -24,7 +24,7 @@ func TestTaskTool_Instructions(t *testing.T) {
 }
 
 func TestTaskTool_Tools(t *testing.T) {
-	tool := NewTransferTaskTool()
+	tool := New()
 
 	allTools, err := tool.Tools(t.Context())
 
@@ -65,7 +65,7 @@ func TestTaskTool_Tools(t *testing.T) {
 }
 
 func TestTaskTool_DisplayNames(t *testing.T) {
-	tool := NewTransferTaskTool()
+	tool := New()
 
 	all, err := tool.Tools(t.Context())
 	require.NoError(t, err)
@@ -78,7 +78,7 @@ func TestTaskTool_DisplayNames(t *testing.T) {
 }
 
 func TestTaskTool_StartStop(t *testing.T) {
-	tool := NewTransferTaskTool()
+	tool := New()
 
 	// Tool doesn't need to implement Startable -
 	// it has no initialization or cleanup requirements

@@ -125,7 +125,7 @@ func buildRuntime(ctx context.Context, cfg *latest.Config, env environment.Provi
 			case ts.Type == "filesystem" || ts.Type == "":
 				// Default toolset type is filesystem.
 				if ts.Type == "filesystem" {
-					fsTool := filesystem.NewFilesystemTool("/")
+					fsTool := filesystem.New("/")
 					opts = append(opts, agent.WithToolSets(fsTool))
 				}
 			case ts.Remote.URL != "":

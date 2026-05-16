@@ -14,14 +14,14 @@ const ToolNameUserPrompt = "user_prompt"
 
 // CreateToolSet is used by the tools registry.
 func CreateToolSet() (tools.ToolSet, error) {
-	return newTool(), nil
+	return New(), nil
 }
 
-func newTool() *tool {
-	return &tool{}
+func New() *ToolSet {
+	return &ToolSet{}
 }
 
-type tool struct {
+type ToolSet struct {
 	elicitationHandler tools.ElicitationHandler
 }
 
@@ -36,11 +36,11 @@ type Response struct {
 	Content map[string]any `json:"content,omitempty" jsonschema:"The user response data (only present when action is accept)"`
 }
 
-func (t *tool) SetElicitationHandler(elicitationHandler tools.ElicitationHandler) {
+func (t *ToolSet) SetElicitationHandler(elicitationHandler tools.ElicitationHandler) {
 	t.elicitationHandler = elicitationHandler
 }
 
-func (t *tool) Instructions() string {
+func (t *ToolSet) Instructions() string {
 	return `## User Prompt Tool
 
 Ask the user a question when you need clarification, input, or a decision.
@@ -52,7 +52,7 @@ Optionally provide a JSON schema to structure the response:
 Response contains "action" (accept/decline/cancel) and "content" (user data when accepted).`
 }
 
-func (t *tool) Tools(context.Context) ([]tools.Tool, error) {
+func (t *ToolSet) Tools(context.Context) ([]tools.Tool, error) {
 	return []tools.Tool{
 		{
 			Name:         ToolNameUserPrompt,
@@ -69,7 +69,7 @@ func (t *tool) Tools(context.Context) ([]tools.Tool, error) {
 	}, nil
 }
 
-func (t *tool) userPrompt(ctx context.Context, params Args) (*tools.ToolCallResult, error) {
+func (t *ToolSet) userPrompt(ctx context.Context, params Args) (*tools.ToolCallResult, error) {
 	if t.elicitationHandler == nil {
 		return tools.ResultError("user_prompt tool is not available in this context (no elicitation handler configured)"), nil
 	}

@@ -8,19 +8,19 @@ import (
 
 const ToolNameHandoff = "handoff"
 
-type Tool struct{}
+type ToolSet struct{}
 
-var _ tools.ToolSet = (*Tool)(nil)
+var _ tools.ToolSet = (*ToolSet)(nil)
 
 type Args struct {
 	Agent string `json:"agent" jsonschema:"The name of the agent to hand off the conversation to."`
 }
 
-func NewHandoffTool() *Tool {
-	return &Tool{}
+func New() *ToolSet {
+	return &ToolSet{}
 }
 
-func (t *Tool) Tools(context.Context) ([]tools.Tool, error) {
+func (t *ToolSet) Tools(context.Context) ([]tools.Tool, error) {
 	return []tools.Tool{
 		{
 			Name:        ToolNameHandoff,

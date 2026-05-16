@@ -32,16 +32,16 @@ const (
 	ToolNameStopBackgroundJob  = "stop_background_job"
 )
 
-// Tool provides shell command execution capabilities.
-type Tool struct {
+// ToolSet provides shell command execution capabilities.
+type ToolSet struct {
 	handler *shellHandler
 }
 
 // Verify interface compliance
 var (
-	_ tools.ToolSet      = (*Tool)(nil)
-	_ tools.Startable    = (*Tool)(nil)
-	_ tools.Instructable = (*Tool)(nil)
+	_ tools.ToolSet      = (*ToolSet)(nil)
+	_ tools.Startable    = (*ToolSet)(nil)
+	_ tools.Instructable = (*ToolSet)(nil)
 )
 
 type shellHandler struct {
@@ -460,11 +460,11 @@ func CreateToolSet(ctx context.Context, toolset latest.Toolset, runConfig *confi
 	}
 	env = append(env, os.Environ()...)
 
-	return NewShellTool(env, runConfig), nil
+	return New(env, runConfig), nil
 }
 
-// NewShellTool creates a new shell tool.
-func NewShellTool(env []string, runConfig *config.RuntimeConfig) *Tool {
+// New creates a new shell toolset.
+func New(env []string, runConfig *config.RuntimeConfig) *ToolSet {
 	shell, argsPrefix := detectShell()
 
 	handler := &shellHandler{
@@ -476,7 +476,7 @@ func NewShellTool(env []string, runConfig *config.RuntimeConfig) *Tool {
 		workingDir:      runConfig.WorkingDir,
 	}
 
-	return &Tool{handler: handler}
+	return &ToolSet{handler: handler}
 }
 
 // detectShell returns the appropriate shell and arguments based on the platform.
@@ -515,7 +515,7 @@ func formatCommandOutput(timeoutCtx, ctx context.Context, err error, rawOutput s
 	return cmp.Or(strings.TrimSpace(output), "<no output>")
 }
 
-func (t *Tool) Instructions() string {
+func (t *ToolSet) Instructions() string {
 	return `## Shell Tools
 
 - Each call runs in a fresh shell session — no state persists between calls
@@ -529,7 +529,7 @@ func (t *Tool) Instructions() string {
 Use run_background_job for long-running processes (servers, watchers). Output capped at 10MB per job. All jobs auto-terminate when the agent stops.`
 }
 
-func (t *Tool) Tools(context.Context) ([]tools.Tool, error) {
+func (t *ToolSet) Tools(context.Context) ([]tools.Tool, error) {
 	return []tools.Tool{
 		{
 			Name:                    ToolNameShell,
@@ -583,11 +583,11 @@ func (t *Tool) Tools(context.Context) ([]tools.Tool, error) {
 	}, nil
 }
 
-func (t *Tool) Start(context.Context) error {
+func (t *ToolSet) Start(context.Context) error {
 	return nil
 }
 
-func (t *Tool) Stop(context.Context) error {
+func (t *ToolSet) Stop(context.Context) error {
 	// Terminate all running background jobs
 	t.handler.jobs.Range(func(_ string, job *backgroundJob) bool {
 		if job.status.CompareAndSwap(statusRunning, statusStopped) {

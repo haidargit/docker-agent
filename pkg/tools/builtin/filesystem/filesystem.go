@@ -41,7 +41,7 @@ type PostEditConfig struct {
 	Cmd  string // Command to execute (with $path placeholder)
 }
 
-type Tool struct {
+type ToolSet struct {
 	workingDir       string
 	postEditCommands []PostEditConfig
 	ignoreVCS        bool
@@ -64,21 +64,21 @@ type Tool struct {
 
 // Verify interface compliance
 var (
-	_ tools.ToolSet      = (*Tool)(nil)
-	_ tools.Instructable = (*Tool)(nil)
-	_ io.Closer          = (*Tool)(nil)
+	_ tools.ToolSet      = (*ToolSet)(nil)
+	_ tools.Instructable = (*ToolSet)(nil)
+	_ io.Closer          = (*ToolSet)(nil)
 )
 
-type Opt func(*Tool)
+type Opt func(*ToolSet)
 
 func WithPostEditCommands(postEditCommands []PostEditConfig) Opt {
-	return func(t *Tool) {
+	return func(t *ToolSet) {
 		t.postEditCommands = postEditCommands
 	}
 }
 
 func WithIgnoreVCS(ignoreVCS bool) Opt {
-	return func(t *Tool) {
+	return func(t *ToolSet) {
 		t.ignoreVCS = ignoreVCS
 	}
 }
@@ -98,7 +98,7 @@ func WithIgnoreVCS(ignoreVCS bool) Opt {
 // Invalid entries (e.g. an empty string) are logged and the allow-list is
 // silently dropped, mirroring how WithIgnoreVCS handles construction errors.
 func WithAllowList(roots []string) Opt {
-	return func(t *Tool) {
+	return func(t *ToolSet) {
 		set, err := newPathRootSet(t.workingDir, roots)
 		if err != nil {
 			slog.Error("filesystem allow-list: invalid entry; disabling toolset", "error", err)
@@ -115,7 +115,7 @@ func WithAllowList(roots []string) Opt {
 // path that matches both is rejected. An empty or nil slice disables the
 // deny-list.
 func WithDenyList(roots []string) Opt {
-	return func(t *Tool) {
+	return func(t *ToolSet) {
 		set, err := newPathRootSet(t.workingDir, roots)
 		if err != nil {
 			slog.Error("filesystem deny-list: invalid entry; disabling toolset", "error", err)
@@ -163,11 +163,11 @@ func CreateToolSet(toolset latest.Toolset, runConfig *config.RuntimeConfig) (too
 		opts = append(opts, WithPostEditCommands(postEditConfigs))
 	}
 
-	return NewFilesystemTool(wd, opts...), nil
+	return New(wd, opts...), nil
 }
 
-func NewFilesystemTool(workingDir string, opts ...Opt) *Tool {
-	t := &Tool{
+func New(workingDir string, opts ...Opt) *ToolSet {
+	t := &ToolSet{
 		workingDir: workingDir,
 	}
 
@@ -180,7 +180,7 @@ func NewFilesystemTool(workingDir string, opts ...Opt) *Tool {
 
 // Close releases any *os.Root file descriptors held by the allow/deny lists.
 // It is safe to call Close multiple times.
-func (t *Tool) Close() error {
+func (t *ToolSet) Close() error {
 	if t.allowList != nil {
 		t.allowList.close()
 	}
@@ -190,7 +190,7 @@ func (t *Tool) Close() error {
 	return nil
 }
 
-func (t *Tool) Instructions() string {
+func (t *ToolSet) Instructions() string {
 	var b strings.Builder
 	b.WriteString(`## Filesystem Tools
 
@@ -387,7 +387,7 @@ func tryRepairEditFileJSON(data []byte) ([]byte, bool) {
 	return nil, false
 }
 
-func (t *Tool) Tools(context.Context) ([]tools.Tool, error) {
+func (t *ToolSet) Tools(context.Context) ([]tools.Tool, error) {
 	return []tools.Tool{
 		{
 			Name:        ToolNameDirectoryTree,
@@ -525,7 +525,7 @@ func (t *Tool) Tools(context.Context) ([]tools.Tool, error) {
 }
 
 // executePostEditCommands executes any matching post-edit commands for the given file path
-func (t *Tool) executePostEditCommands(ctx context.Context, filePath string) error {
+func (t *ToolSet) executePostEditCommands(ctx context.Context, filePath string) error {
 	if len(t.postEditCommands) == 0 {
 		return nil
 	}
@@ -542,7 +542,7 @@ func (t *Tool) executePostEditCommands(ctx context.Context, filePath string) err
 // resolvePath does NOT enforce the allow- or deny-lists; callers should use
 // [resolveAndCheckPath] when those checks are required (i.e. for any path
 // that originates from a tool argument).
-func (t *Tool) resolvePath(path string) string {
+func (t *ToolSet) resolvePath(path string) string {
 	if expandedPath, err := pathx.ExpandHomeDir(path); err == nil {
 		path = expandedPath
 	}
@@ -592,7 +592,7 @@ func (t *Tool) resolvePath(path string) string {
 //     the allow-list root.
 //   - On GOOS=windows, [*os.Root] additionally rejects reserved device
 //     names (NUL, COM1, …), which is a strengthening, not a weakening.
-func (t *Tool) resolveAndCheckPath(path string) (string, error) {
+func (t *ToolSet) resolveAndCheckPath(path string) (string, error) {
 	if t.sandboxBroken {
 		return "", errors.New("filesystem toolset is disabled due to invalid allow/deny list configuration")
 	}
@@ -628,7 +628,7 @@ func (t *Tool) resolveAndCheckPath(path string) (string, error) {
 //   - Path no longer inside any entry (e.g. a symlink swap moved the real
 //     target out between the static check and the I/O) → (nil, "", err):
 //     callers MUST refuse; falling back to os.* would follow the symlink.
-func (t *Tool) rootedAccess(resolved string) (*os.Root, string, error) {
+func (t *ToolSet) rootedAccess(resolved string) (*os.Root, string, error) {
 	if t.allowList == nil {
 		return nil, "", nil
 	}
@@ -647,7 +647,7 @@ func (t *Tool) rootedAccess(resolved string) (*os.Root, string, error) {
 // allow-list contains. When no rooted access is available it falls back to
 // the plain [os.ReadFile]. Callers MUST pass a path that has already been
 // validated by [resolveAndCheckPath].
-func (t *Tool) readFile(resolved string) ([]byte, error) {
+func (t *ToolSet) readFile(resolved string) ([]byte, error) {
 	root, rel, err := t.rootedAccess(resolved)
 	if err != nil {
 		return nil, err
@@ -662,7 +662,7 @@ func (t *Tool) readFile(resolved string) ([]byte, error) {
 // for the contract. The call is rejected by the kernel when any component
 // of rel is an out-of-root symlink, so an attacker cannot win the swap
 // race between the [resolveAndCheckPath] check and the write.
-func (t *Tool) writeFile(resolved string, data []byte, perm os.FileMode) error {
+func (t *ToolSet) writeFile(resolved string, data []byte, perm os.FileMode) error {
 	root, rel, err := t.rootedAccess(resolved)
 	if err != nil {
 		return err
@@ -675,7 +675,7 @@ func (t *Tool) writeFile(resolved string, data []byte, perm os.FileMode) error {
 
 // stat is a TOCTOU-safe equivalent of [os.Stat]. See [readFile] for the
 // contract.
-func (t *Tool) stat(resolved string) (os.FileInfo, error) {
+func (t *ToolSet) stat(resolved string) (os.FileInfo, error) {
 	root, rel, err := t.rootedAccess(resolved)
 	if err != nil {
 		return nil, err
@@ -689,7 +689,7 @@ func (t *Tool) stat(resolved string) (os.FileInfo, error) {
 // mkdirAll is a TOCTOU-safe equivalent of [os.MkdirAll]. See [readFile]
 // for the contract. A rooted MkdirAll on "." is a no-op (the root already
 // exists by construction).
-func (t *Tool) mkdirAll(resolved string, perm os.FileMode) error {
+func (t *ToolSet) mkdirAll(resolved string, perm os.FileMode) error {
 	root, rel, err := t.rootedAccess(resolved)
 	if err != nil {
 		return err
@@ -706,7 +706,7 @@ func (t *Tool) mkdirAll(resolved string, perm os.FileMode) error {
 // readDir is a TOCTOU-safe equivalent of [os.ReadDir]. See [readFile]
 // for the contract. We use [*os.Root].Open + [*os.File].ReadDir because
 // [*os.Root] does not expose ReadDir directly.
-func (t *Tool) readDir(resolved string) ([]os.DirEntry, error) {
+func (t *ToolSet) readDir(resolved string) ([]os.DirEntry, error) {
 	root, rel, err := t.rootedAccess(resolved)
 	if err != nil {
 		return nil, err
@@ -726,7 +726,7 @@ func (t *Tool) readDir(resolved string) ([]os.DirEntry, error) {
 // is available we use [*os.Root].Remove, which only unlinks the named
 // directory entry and refuses to follow a trailing symlink that escapes
 // the root. Otherwise we fall back to the platform-specific [rmdir].
-func (t *Tool) removeDir(resolved string) error {
+func (t *ToolSet) removeDir(resolved string) error {
 	root, rel, err := t.rootedAccess(resolved)
 	if err != nil {
 		return err
@@ -739,7 +739,7 @@ func (t *Tool) removeDir(resolved string) error {
 
 // initGitignoreMatcher initializes the gitignore matcher for the working directory.
 // It is safe to call multiple times; initialization only happens once.
-func (t *Tool) initGitignoreMatcher() {
+func (t *ToolSet) initGitignoreMatcher() {
 	if !t.ignoreVCS {
 		return
 	}
@@ -762,7 +762,7 @@ func (t *Tool) initGitignoreMatcher() {
 }
 
 // shouldIgnorePath checks if a path should be ignored based on VCS rules
-func (t *Tool) shouldIgnorePath(path string) bool {
+func (t *ToolSet) shouldIgnorePath(path string) bool {
 	if !t.ignoreVCS {
 		return false
 	}
@@ -781,7 +781,7 @@ func (t *Tool) shouldIgnorePath(path string) bool {
 
 // Handler implementations
 
-func (t *Tool) handleDirectoryTree(ctx context.Context, args DirectoryTreeArgs) (*tools.ToolCallResult, error) {
+func (t *ToolSet) handleDirectoryTree(ctx context.Context, args DirectoryTreeArgs) (*tools.ToolCallResult, error) {
 	resolvedPath, err := t.resolveAndCheckPath(args.Path)
 	if err != nil {
 		return tools.ResultError(err.Error()), nil
@@ -839,7 +839,7 @@ func countTreeNodes(node *fsx.TreeNode) (files, dirs int) {
 // repair logic for malformed JSON, then delegates to handleEditFile.
 // This bypasses tools.NewHandler because Go's json.Unmarshal scanner rejects
 // structurally invalid JSON before calling any custom UnmarshalJSON method.
-func (t *Tool) editFileHandler() tools.ToolHandler {
+func (t *ToolSet) editFileHandler() tools.ToolHandler {
 	return func(ctx context.Context, toolCall tools.ToolCall) (*tools.ToolCallResult, error) {
 		data := toolCall.Function.Arguments
 		if data == "" {
@@ -853,7 +853,7 @@ func (t *Tool) editFileHandler() tools.ToolHandler {
 	}
 }
 
-func (t *Tool) handleEditFile(ctx context.Context, args EditFileArgs) (*tools.ToolCallResult, error) {
+func (t *ToolSet) handleEditFile(ctx context.Context, args EditFileArgs) (*tools.ToolCallResult, error) {
 	resolvedPath, err := t.resolveAndCheckPath(args.Path)
 	if err != nil {
 		return tools.ResultError(err.Error()), nil
@@ -891,7 +891,7 @@ func (t *Tool) handleEditFile(ctx context.Context, args EditFileArgs) (*tools.To
 	return tools.ResultSuccess("File edited successfully. Changes:\n" + strings.Join(changes, "\n")), nil
 }
 
-func (t *Tool) handleListDirectory(_ context.Context, args ListDirectoryArgs) (*tools.ToolCallResult, error) {
+func (t *ToolSet) handleListDirectory(_ context.Context, args ListDirectoryArgs) (*tools.ToolCallResult, error) {
 	resolvedPath, err := t.resolveAndCheckPath(args.Path)
 	if err != nil {
 		return tools.ResultError(err.Error()), nil
@@ -932,7 +932,7 @@ func (t *Tool) handleListDirectory(_ context.Context, args ListDirectoryArgs) (*
 	}, nil
 }
 
-func (t *Tool) handleReadFile(_ context.Context, args ReadFileArgs) (*tools.ToolCallResult, error) {
+func (t *ToolSet) handleReadFile(_ context.Context, args ReadFileArgs) (*tools.ToolCallResult, error) {
 	resolvedPath, err := t.resolveAndCheckPath(args.Path)
 	if err != nil {
 		return &tools.ToolCallResult{
@@ -989,7 +989,7 @@ func (t *Tool) handleReadFile(_ context.Context, args ReadFileArgs) (*tools.Tool
 
 // readImageFile reads an image file and returns it as base64-encoded image content.
 // The caller must ensure the file exists (e.g. via os.Stat) before calling this method.
-func (t *Tool) readImageFile(resolvedPath, originalPath string) (*tools.ToolCallResult, error) {
+func (t *ToolSet) readImageFile(resolvedPath, originalPath string) (*tools.ToolCallResult, error) {
 	data, err := t.readFile(resolvedPath)
 	if err != nil {
 		errMsg := err.Error()
@@ -1038,7 +1038,7 @@ func (t *Tool) readImageFile(resolvedPath, originalPath string) (*tools.ToolCall
 	}, nil
 }
 
-func (t *Tool) handleReadMultipleFiles(ctx context.Context, args ReadMultipleFilesArgs) (*tools.ToolCallResult, error) {
+func (t *ToolSet) handleReadMultipleFiles(ctx context.Context, args ReadMultipleFilesArgs) (*tools.ToolCallResult, error) {
 	type PathContent struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -1112,7 +1112,7 @@ func (t *Tool) handleReadMultipleFiles(ctx context.Context, args ReadMultipleFil
 	}, nil
 }
 
-func (t *Tool) handleSearchFilesContent(_ context.Context, args SearchFilesContentArgs) (*tools.ToolCallResult, error) {
+func (t *ToolSet) handleSearchFilesContent(_ context.Context, args SearchFilesContentArgs) (*tools.ToolCallResult, error) {
 	resolvedPath, err := t.resolveAndCheckPath(args.Path)
 	if err != nil {
 		return tools.ResultError(err.Error()), nil
@@ -1231,7 +1231,7 @@ func (t *Tool) handleSearchFilesContent(_ context.Context, args SearchFilesConte
 	}, nil
 }
 
-func (t *Tool) handleWriteFile(ctx context.Context, args WriteFileArgs) (*tools.ToolCallResult, error) {
+func (t *ToolSet) handleWriteFile(ctx context.Context, args WriteFileArgs) (*tools.ToolCallResult, error) {
 	resolvedPath, err := t.resolveAndCheckPath(args.Path)
 	if err != nil {
 		return tools.ResultError(err.Error()), nil
@@ -1254,7 +1254,7 @@ func (t *Tool) handleWriteFile(ctx context.Context, args WriteFileArgs) (*tools.
 	return tools.ResultSuccess(fmt.Sprintf("File written successfully: %s (%d bytes)", args.Path, len(args.Content))), nil
 }
 
-func (t *Tool) handleCreateDirectory(_ context.Context, args CreateDirectoryArgs) (*tools.ToolCallResult, error) {
+func (t *ToolSet) handleCreateDirectory(_ context.Context, args CreateDirectoryArgs) (*tools.ToolCallResult, error) {
 	var results []string
 	for _, path := range args.Paths {
 		resolvedPath, err := t.resolveAndCheckPath(path)
@@ -1270,7 +1270,7 @@ func (t *Tool) handleCreateDirectory(_ context.Context, args CreateDirectoryArgs
 	return tools.ResultSuccess(strings.Join(results, "\n")), nil
 }
 
-func (t *Tool) handleRemoveDirectory(_ context.Context, args RemoveDirectoryArgs) (*tools.ToolCallResult, error) {
+func (t *ToolSet) handleRemoveDirectory(_ context.Context, args RemoveDirectoryArgs) (*tools.ToolCallResult, error) {
 	var results []string
 	for _, path := range args.Paths {
 		resolvedPath, err := t.resolveAndCheckPath(path)

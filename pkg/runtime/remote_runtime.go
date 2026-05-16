@@ -567,7 +567,7 @@ func (r *RemoteRuntime) ResetStartupInfo() {
 }
 
 // CurrentAgentSkillsToolset returns nil for remote runtimes since skills are managed server-side.
-func (r *RemoteRuntime) CurrentAgentSkillsToolset() *skills.Toolset {
+func (r *RemoteRuntime) CurrentAgentSkillsToolset() *skills.ToolSet {
 	return nil
 }
 

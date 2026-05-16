@@ -21,7 +21,7 @@ type deferredToolEntry struct {
 	source tools.ToolSet
 }
 
-type Toolset struct {
+type ToolSet struct {
 	mu             sync.RWMutex
 	deferredTools  map[string]deferredToolEntry
 	activatedTools map[string]tools.Tool
@@ -30,9 +30,9 @@ type Toolset struct {
 
 // Verify interface compliance
 var (
-	_ tools.ToolSet      = (*Toolset)(nil)
-	_ tools.Startable    = (*Toolset)(nil)
-	_ tools.Instructable = (*Toolset)(nil)
+	_ tools.ToolSet      = (*ToolSet)(nil)
+	_ tools.Startable    = (*ToolSet)(nil)
+	_ tools.Instructable = (*ToolSet)(nil)
 )
 
 type deferredSource struct {
@@ -41,14 +41,14 @@ type deferredSource struct {
 	tools    []string
 }
 
-func NewDeferredToolset() *Toolset {
-	return &Toolset{
+func New() *ToolSet {
+	return &ToolSet{
 		deferredTools:  make(map[string]deferredToolEntry),
 		activatedTools: make(map[string]tools.Tool),
 	}
 }
 
-func (d *Toolset) AddSource(toolset tools.ToolSet, deferAll bool, toolNames []string) {
+func (d *ToolSet) AddSource(toolset tools.ToolSet, deferAll bool, toolNames []string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -59,13 +59,13 @@ func (d *Toolset) AddSource(toolset tools.ToolSet, deferAll bool, toolNames []st
 	})
 }
 
-func (d *Toolset) HasSources() bool {
+func (d *ToolSet) HasSources() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return len(d.sources) > 0
 }
 
-func (d *Toolset) Instructions() string {
+func (d *ToolSet) Instructions() string {
 	return `## Deferred Tools
 
 Use search_tool to discover additional tools by keyword (e.g., "remote", "read", "write"). Use add_tool to activate a discovered tool.`
@@ -84,7 +84,7 @@ type AddToolArgs struct {
 	Name string `json:"name" jsonschema:"The name of the tool to activate"`
 }
 
-func (d *Toolset) handleSearchTool(_ context.Context, args SearchToolArgs) (*tools.ToolCallResult, error) {
+func (d *ToolSet) handleSearchTool(_ context.Context, args SearchToolArgs) (*tools.ToolCallResult, error) {
 	query := strings.ToLower(args.Query)
 
 	d.mu.RLock()
@@ -115,7 +115,7 @@ func (d *Toolset) handleSearchTool(_ context.Context, args SearchToolArgs) (*too
 	return tools.ResultSuccess(fmt.Sprintf("Found %d deferred tool(s):\n%s", len(results), string(output))), nil
 }
 
-func (d *Toolset) handleAddTool(_ context.Context, args AddToolArgs) (*tools.ToolCallResult, error) {
+func (d *ToolSet) handleAddTool(_ context.Context, args AddToolArgs) (*tools.ToolCallResult, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -134,7 +134,7 @@ func (d *Toolset) handleAddTool(_ context.Context, args AddToolArgs) (*tools.Too
 	return tools.ResultSuccess(fmt.Sprintf("Tool '%s' has been activated and is now available for use.\n\nDescription: %s", args.Name, entry.tool.Description)), nil
 }
 
-func (d *Toolset) Tools(context.Context) ([]tools.Tool, error) {
+func (d *ToolSet) Tools(context.Context) ([]tools.Tool, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
@@ -172,7 +172,7 @@ func (d *Toolset) Tools(context.Context) ([]tools.Tool, error) {
 	return result, nil
 }
 
-func (d *Toolset) Start(ctx context.Context) error {
+func (d *ToolSet) Start(ctx context.Context) error {
 	// Note: we are not responsible for starting the underlying toolsets here
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -200,6 +200,6 @@ func (d *Toolset) Start(ctx context.Context) error {
 	return nil
 }
 
-func (d *Toolset) Stop(context.Context) error {
+func (d *ToolSet) Stop(context.Context) error {
 	return nil
 }

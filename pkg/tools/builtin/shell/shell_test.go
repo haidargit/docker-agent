@@ -15,16 +15,16 @@ import (
 	"github.com/docker/docker-agent/pkg/tools"
 )
 
-func TestNewShellTool(t *testing.T) {
+func TestNew(t *testing.T) {
 	t.Setenv("SHELL", "/bin/bash")
-	tool := NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
 
 	assert.NotNil(t, tool)
 	assert.NotNil(t, tool.handler)
 	assert.Equal(t, "/bin/bash", tool.handler.shell)
 
 	t.Setenv("SHELL", "")
-	tool = NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
+	tool = New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
 
 	assert.NotNil(t, tool)
 	assert.NotNil(t, tool.handler)
@@ -32,7 +32,7 @@ func TestNewShellTool(t *testing.T) {
 }
 
 func TestShellTool_HandlerEcho(t *testing.T) {
-	tool := NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
 
 	result, err := tool.handler.RunShell(t.Context(), RunShellArgs{
 		Cmd: "echo 'hello world'",
@@ -43,7 +43,7 @@ func TestShellTool_HandlerEcho(t *testing.T) {
 }
 
 func TestShellTool_HandlerWithCwd(t *testing.T) {
-	tool := NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
 	tmpDir := t.TempDir()
 
 	result, err := tool.handler.RunShell(t.Context(), RunShellArgs{
@@ -136,7 +136,7 @@ func TestRunShellBackgroundArgs_UnmarshalJSON_AcceptsCmdAndCommand(t *testing.T)
 // use "command" instead of "cmd" must execute normally rather than return
 // the missing-parameter error.
 func TestShellTool_HandlerAcceptsCommandAlias(t *testing.T) {
-	tool := NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
 
 	var params RunShellArgs
 	require.NoError(t, json.Unmarshal([]byte(`{"command":"echo hello-from-alias"}`), &params))
@@ -147,7 +147,7 @@ func TestShellTool_HandlerAcceptsCommandAlias(t *testing.T) {
 }
 
 func TestShellTool_HandlerMissingCmdReturnsActionableError(t *testing.T) {
-	tool := NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
 
 	result, err := tool.handler.RunShell(t.Context(), RunShellArgs{})
 	require.NoError(t, err)
@@ -156,7 +156,7 @@ func TestShellTool_HandlerMissingCmdReturnsActionableError(t *testing.T) {
 }
 
 func TestShellTool_HandlerError(t *testing.T) {
-	tool := NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
 
 	result, err := tool.handler.RunShell(t.Context(), RunShellArgs{
 		Cmd: "command_that_does_not_exist",
@@ -167,7 +167,7 @@ func TestShellTool_HandlerError(t *testing.T) {
 }
 
 func TestShellTool_OutputSchema(t *testing.T) {
-	tool := NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
 
 	allTools, err := tool.Tools(t.Context())
 	require.NoError(t, err)
@@ -179,7 +179,7 @@ func TestShellTool_OutputSchema(t *testing.T) {
 }
 
 func TestShellTool_ParametersAreObjects(t *testing.T) {
-	tool := NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
 
 	allTools, err := tool.Tools(t.Context())
 	require.NoError(t, err)
@@ -194,7 +194,7 @@ func TestShellTool_ParametersAreObjects(t *testing.T) {
 
 // Minimal tests for background job features
 func TestShellTool_RunBackgroundJob(t *testing.T) {
-	tool := NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
 	err := tool.Start(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -207,7 +207,7 @@ func TestShellTool_RunBackgroundJob(t *testing.T) {
 }
 
 func TestShellTool_ListBackgroundJobs(t *testing.T) {
-	tool := NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
 	err := tool.Start(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -229,7 +229,7 @@ func TestShellTool_ListBackgroundJobs(t *testing.T) {
 func TestShellTool_Instructions(t *testing.T) {
 	t.Parallel()
 
-	tool := NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
 
 	instructions := tool.Instructions()
 
@@ -270,7 +270,7 @@ func TestShellTool_RelativeCwdResolvesAgainstWorkingDir(t *testing.T) {
 	subdir := workingDir + "/subdir"
 	require.NoError(t, os.Mkdir(subdir, 0o755))
 
-	tool := NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: workingDir}})
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: workingDir}})
 
 	result, err := tool.handler.RunShell(t.Context(), RunShellArgs{
 		Cmd: "pwd",
@@ -296,7 +296,7 @@ func TestShellTool_BackgroundedChildDoesNotBlockReturn(t *testing.T) {
 		t.Skip("POSIX shell backgrounding semantics; skipped on Windows")
 	}
 
-	tool := NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
 
 	start := time.Now()
 	result, err := tool.handler.RunShell(t.Context(), RunShellArgs{
@@ -325,7 +325,7 @@ func TestShellTool_DetachedBackgroundedChildDoesNotBlockReturn(t *testing.T) {
 		t.Skip("setsid not available")
 	}
 
-	tool := NewShellTool(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: t.TempDir()}})
 
 	done := make(chan struct{})
 	var result *tools.ToolCallResult

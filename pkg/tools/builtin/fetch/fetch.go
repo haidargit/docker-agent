@@ -28,14 +28,14 @@ const (
 	ToolNameFetch = "fetch"
 )
 
-type Tool struct {
+type ToolSet struct {
 	handler *fetchHandler
 }
 
 // Verify interface compliance
 var (
-	_ tools.ToolSet      = (*Tool)(nil)
-	_ tools.Instructable = (*Tool)(nil)
+	_ tools.ToolSet      = (*ToolSet)(nil)
+	_ tools.Instructable = (*ToolSet)(nil)
 )
 
 type fetchHandler struct {
@@ -474,11 +474,11 @@ func CreateToolSet(ctx context.Context, toolset latest.Toolset, runConfig *confi
 		opts = append(opts, WithAllowPrivateIPs(true))
 	}
 	opts = append(opts, WithHeaders(expander.ExpandMap(ctx, toolset.Headers)))
-	return NewFetchTool(opts...), nil
+	return New(opts...), nil
 }
 
-func NewFetchTool(options ...ToolOption) *Tool {
-	tool := &Tool{
+func New(options ...ToolOption) *ToolSet {
+	tool := &ToolSet{
 		handler: &fetchHandler{
 			timeout: 30 * time.Second,
 		},
@@ -491,10 +491,10 @@ func NewFetchTool(options ...ToolOption) *Tool {
 	return tool
 }
 
-type ToolOption func(*Tool)
+type ToolOption func(*ToolSet)
 
 func WithTimeout(timeout time.Duration) ToolOption {
-	return func(t *Tool) {
+	return func(t *ToolSet) {
 		t.handler.timeout = timeout
 	}
 }
@@ -503,7 +503,7 @@ func WithTimeout(timeout time.Duration) ToolOption {
 // of the supplied domain patterns. See matchesDomain for matching rules.
 // An empty or nil slice disables the allow-list (every host is allowed).
 func WithAllowedDomains(domains []string) ToolOption {
-	return func(t *Tool) {
+	return func(t *ToolSet) {
 		t.handler.allowedDomains = domains
 	}
 }
@@ -512,7 +512,7 @@ func WithAllowedDomains(domains []string) ToolOption {
 // matches one of the supplied domain patterns. See matchesDomain for matching
 // rules. An empty or nil slice disables the deny-list.
 func WithBlockedDomains(domains []string) ToolOption {
-	return func(t *Tool) {
+	return func(t *ToolSet) {
 		t.handler.blockedDomains = domains
 	}
 }
@@ -524,7 +524,7 @@ func WithBlockedDomains(domains []string) ToolOption {
 // so DNS rebinding cannot bypass the check. Set to true only when an
 // agent legitimately needs to reach internal services.
 func WithAllowPrivateIPs(allow bool) ToolOption {
-	return func(t *Tool) {
+	return func(t *ToolSet) {
 		t.handler.allowPrivateIPs = allow
 	}
 }
@@ -534,12 +534,12 @@ func WithAllowPrivateIPs(allow bool) ToolOption {
 // These are applied last, so they override the default User-Agent and the
 // format-driven Accept header. An empty or nil map is a no-op.
 func WithHeaders(headers map[string]string) ToolOption {
-	return func(t *Tool) {
+	return func(t *ToolSet) {
 		t.handler.headers = headers
 	}
 }
 
-func (t *Tool) Instructions() string {
+func (t *ToolSet) Instructions() string {
 	var b strings.Builder
 	b.WriteString("## Fetch Tool\n\nFetch content from HTTP/HTTPS URLs. Supports multiple URLs per call, output format selection (text, markdown, html), and respects robots.txt.")
 	if d := t.handler.allowedDomains; len(d) > 0 {
@@ -551,7 +551,7 @@ func (t *Tool) Instructions() string {
 	return b.String()
 }
 
-func (t *Tool) Tools(context.Context) ([]tools.Tool, error) {
+func (t *ToolSet) Tools(context.Context) ([]tools.Tool, error) {
 	return []tools.Tool{
 		{
 			Name:        ToolNameFetch,

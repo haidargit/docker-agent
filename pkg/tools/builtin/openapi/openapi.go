@@ -36,11 +36,11 @@ func CreateToolSet(ctx context.Context, toolset latest.Toolset, runConfig *confi
 	specURL := expander.Expand(ctx, toolset.URL, nil)
 	headers := expander.ExpandMap(ctx, toolset.Headers)
 
-	return NewOpenAPITool(specURL, headers), nil
+	return New(specURL, headers), nil
 }
 
-// Tool generates HTTP tools from an OpenAPI specification.
-type Tool struct {
+// ToolSet generates HTTP tools from an OpenAPI specification.
+type ToolSet struct {
 	specURL string
 	headers map[string]string
 
@@ -53,20 +53,20 @@ type Tool struct {
 
 // Verify interface compliance.
 var (
-	_ tools.ToolSet      = (*Tool)(nil)
-	_ tools.Instructable = (*Tool)(nil)
+	_ tools.ToolSet      = (*ToolSet)(nil)
+	_ tools.Instructable = (*ToolSet)(nil)
 )
 
-// NewOpenAPITool creates a new OpenAPI toolset from the given spec URL.
-func NewOpenAPITool(specURL string, headers map[string]string) *Tool {
-	return &Tool{
+// New creates a new OpenAPI toolset from the given spec URL.
+func New(specURL string, headers map[string]string) *ToolSet {
+	return &ToolSet{
 		specURL: specURL,
 		headers: headers,
 	}
 }
 
 // Instructions returns usage instructions for the OpenAPI toolset.
-func (t *Tool) Instructions() string {
+func (t *ToolSet) Instructions() string {
 	return fmt.Sprintf(`## OpenAPI tools
 
 These tools were generated from the OpenAPI specification at %s.
@@ -74,7 +74,7 @@ Each tool corresponds to an API endpoint. Use the tool parameters as described.`
 }
 
 // Tools fetches and parses the OpenAPI specification, returning a tool for each operation.
-func (t *Tool) Tools(ctx context.Context) ([]tools.Tool, error) {
+func (t *ToolSet) Tools(ctx context.Context) ([]tools.Tool, error) {
 	spec, err := t.fetchSpec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch OpenAPI spec from %s: %w", t.specURL, err)
@@ -84,7 +84,7 @@ func (t *Tool) Tools(ctx context.Context) ([]tools.Tool, error) {
 }
 
 // fetchSpec retrieves and parses the OpenAPI specification from the configured URL.
-func (t *Tool) fetchSpec(ctx context.Context) (*v3.Document, error) {
+func (t *ToolSet) fetchSpec(ctx context.Context) (*v3.Document, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.specURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -134,7 +134,7 @@ func (t *Tool) fetchSpec(ctx context.Context) (*v3.Document, error) {
 }
 
 // buildTools converts an OpenAPI spec into a list of tools.
-func (t *Tool) buildTools(spec *v3.Document) ([]tools.Tool, error) {
+func (t *ToolSet) buildTools(spec *v3.Document) ([]tools.Tool, error) {
 	baseURL, err := t.resolveBaseURL(spec)
 	if err != nil {
 		return nil, err
@@ -175,7 +175,7 @@ func pathOperations(item *v3.PathItem) map[string]*v3.Operation {
 }
 
 // resolveBaseURL determines the base URL for API requests.
-func (t *Tool) resolveBaseURL(spec *v3.Document) (string, error) {
+func (t *ToolSet) resolveBaseURL(spec *v3.Document) (string, error) {
 	if len(spec.Servers) > 0 && spec.Servers[0].URL != "" {
 		serverURL := spec.Servers[0].URL
 
@@ -207,7 +207,7 @@ func (t *Tool) resolveBaseURL(spec *v3.Document) (string, error) {
 }
 
 // operationToTool converts a single OpenAPI operation to a tool.
-func (t *Tool) operationToTool(baseURL, path, method string, op *v3.Operation) tools.Tool {
+func (t *ToolSet) operationToTool(baseURL, path, method string, op *v3.Operation) tools.Tool {
 	name := operationToolName(path, method, op)
 	desc := operationDescription(path, method, op)
 	schema := operationSchema(op)

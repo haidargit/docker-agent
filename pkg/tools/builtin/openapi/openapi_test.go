@@ -19,9 +19,9 @@ import (
 // dial-time protection so tests can talk to httptest.NewServer (which
 // binds to 127.0.0.1). It is defined in a *_test.go file so it is not
 // compiled into release binaries. Production callers must use
-// [NewOpenAPITool].
-func newOpenAPIToolForTest(specURL string, headers map[string]string) *Tool {
-	t := NewOpenAPITool(specURL, headers)
+// [New].
+func newOpenAPIToolForTest(specURL string, headers map[string]string) *ToolSet {
+	t := New(specURL, headers)
 	t.unsafe = true
 	return t
 }
@@ -386,7 +386,7 @@ func TestOpenAPITool_ErrorResponse(t *testing.T) {
 func TestOpenAPITool_InvalidSpecURL(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewOpenAPITool("http://127.0.0.1:1/nonexistent", nil).Tools(t.Context())
+	_, err := New("http://127.0.0.1:1/nonexistent", nil).Tools(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to fetch OpenAPI spec")
 }
@@ -405,7 +405,7 @@ func TestOpenAPITool_RejectsLocalSpecURL(t *testing.T) {
 	for _, target := range tests {
 		t.Run(target, func(t *testing.T) {
 			t.Parallel()
-			_, err := NewOpenAPITool(target, nil).Tools(t.Context())
+			_, err := New(target, nil).Tools(t.Context())
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "non-public address")
 		})
@@ -445,7 +445,7 @@ func TestOpenAPITool_RejectsLocalSpecServerURL(t *testing.T) {
 	// Even though the spec was fetched in unsafe mode, the generated
 	// handler still inherits the unsafe flag — so for the real safety
 	// guarantee we re-run the operation through the production path.
-	prod := NewOpenAPITool(specServer.URL+"/openapi.json", nil)
+	prod := New(specServer.URL+"/openapi.json", nil)
 	prodTools, err := prod.Tools(t.Context())
 	require.Error(t, err, "production constructor must refuse a loopback spec server")
 	assert.Nil(t, prodTools)
@@ -454,7 +454,7 @@ func TestOpenAPITool_RejectsLocalSpecServerURL(t *testing.T) {
 func TestOpenAPITool_Instructions(t *testing.T) {
 	t.Parallel()
 
-	instructions := NewOpenAPITool("https://example.com/openapi.json", nil).Instructions()
+	instructions := New("https://example.com/openapi.json", nil).Instructions()
 
 	assert.Contains(t, instructions, "OpenAPI")
 	assert.Contains(t, instructions, "https://example.com/openapi.json")

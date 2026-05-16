@@ -11,10 +11,10 @@ const ToolNameThink = "think"
 
 // CreateToolSet is used by the tools registry.
 func CreateToolSet() (tools.ToolSet, error) {
-	return newTool(), nil
+	return New(), nil
 }
 
-type tool struct {
+type ToolSet struct {
 	thoughts []string
 }
 
@@ -22,16 +22,16 @@ type Args struct {
 	Thought string `json:"thought" jsonschema:"The thought to think about"`
 }
 
-func (t *tool) callTool(_ context.Context, params Args) (*tools.ToolCallResult, error) {
+func (t *ToolSet) callTool(_ context.Context, params Args) (*tools.ToolCallResult, error) {
 	t.thoughts = append(t.thoughts, params.Thought)
 	return tools.ResultSuccess("Thoughts:\n" + strings.Join(t.thoughts, "\n")), nil
 }
 
-func newTool() *tool {
-	return &tool{}
+func New() *ToolSet {
+	return &ToolSet{}
 }
 
-func (t *tool) Instructions() string {
+func (t *ToolSet) Instructions() string {
 	return `## Think Tool
 
 Use the think tool as a scratchpad before acting. Think to:
@@ -41,7 +41,7 @@ Use the think tool as a scratchpad before acting. Think to:
 - Reason through complex multi-step problems`
 }
 
-func (t *tool) Tools(context.Context) ([]tools.Tool, error) {
+func (t *ToolSet) Tools(context.Context) ([]tools.Tool, error) {
 	return []tools.Tool{
 		{
 			Name:         ToolNameThink,

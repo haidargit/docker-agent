@@ -36,7 +36,7 @@ const (
 
 // CreateToolSet is used by the tools registry.
 func CreateToolSet() (tools.ToolSet, error) {
-	return NewToolSet(), nil
+	return New(), nil
 }
 
 // RunBackgroundAgentArgs specifies the parameters for dispatching a sub-agent task asynchronously.
@@ -432,21 +432,21 @@ func (h *Handler) RegisterHandlers(register func(name string, fn func(context.Co
 	register(ToolNameStopBackgroundAgent, h.HandleStop)
 }
 
-// NewToolSet returns a lightweight ToolSet for registering background agent
+// New returns a lightweight ToolSet for registering background agent
 // tool definitions and instructions. It does not require a Runner and is
 // suitable for use in the teamloader registry.
-func NewToolSet() tools.ToolSet {
-	return &toolSet{}
+func New() tools.ToolSet {
+	return &ToolSet{}
 }
 
-// toolSet provides tool definitions and instructions without a Runner.
-type toolSet struct{}
+// ToolSet provides tool definitions and instructions without a Runner.
+type ToolSet struct{}
 
-func (t *toolSet) Tools(context.Context) ([]tools.Tool, error) {
+func (t *ToolSet) Tools(context.Context) ([]tools.Tool, error) {
 	return backgroundAgentTools(), nil
 }
 
-func (t *toolSet) Instructions() string {
+func (t *ToolSet) Instructions() string {
 	return `# Background Agent Tasks
 
 Use background agent tasks to dispatch work to sub-agents concurrently.

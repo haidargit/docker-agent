@@ -592,7 +592,7 @@ func TestHandler_ConcurrentAccess(t *testing.T) {
 // --- Tools ---
 
 func TestNewToolSet_ReturnsFourTools(t *testing.T) {
-	ts := NewToolSet()
+	ts := New()
 	toolsList, err := ts.Tools(t.Context())
 	require.NoError(t, err)
 	assert.Len(t, toolsList, 4)
@@ -608,7 +608,7 @@ func TestNewToolSet_ReturnsFourTools(t *testing.T) {
 }
 
 func TestNewToolSet_Instructions(t *testing.T) {
-	ts := NewToolSet()
+	ts := New()
 	instructable, ok := ts.(tools.Instructable)
 	require.True(t, ok, "NewToolSet should implement Instructable")
 

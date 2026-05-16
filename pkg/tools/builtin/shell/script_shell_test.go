@@ -12,8 +12,8 @@ import (
 	"github.com/docker/docker-agent/pkg/tools"
 )
 
-func TestNewScriptShellTool_Empty(t *testing.T) {
-	tool, err := NewScriptShellTool(nil, nil)
+func TestNewScript_Empty(t *testing.T) {
+	tool, err := NewScript(nil, nil)
 	require.NoError(t, err)
 
 	allTools, err := tool.Tools(t.Context())
@@ -21,14 +21,14 @@ func TestNewScriptShellTool_Empty(t *testing.T) {
 	assert.Empty(t, allTools)
 }
 
-func TestNewScriptShellTool_ToolNoArg(t *testing.T) {
+func TestNewScript_ToolNoArg(t *testing.T) {
 	shellTools := map[string]latest.ScriptShellToolConfig{
 		"get_ip": {
 			Description: "Get public IP",
 		},
 	}
 
-	tool, err := NewScriptShellTool(shellTools, nil)
+	tool, err := NewScript(shellTools, nil)
 	require.NoError(t, err)
 
 	allTools, err := tool.Tools(t.Context())
@@ -43,7 +43,7 @@ func TestNewScriptShellTool_ToolNoArg(t *testing.T) {
 }`, string(schema))
 }
 
-func TestNewScriptShellTool_Tool(t *testing.T) {
+func TestNewScript_Tool(t *testing.T) {
 	shellTools := map[string]latest.ScriptShellToolConfig{
 		"github_user_repos": {
 			Description: "List GitHub repositories of the provided user",
@@ -57,7 +57,7 @@ func TestNewScriptShellTool_Tool(t *testing.T) {
 		},
 	}
 
-	tool, err := NewScriptShellTool(shellTools, nil)
+	tool, err := NewScript(shellTools, nil)
 	require.NoError(t, err)
 
 	allTools, err := tool.Tools(t.Context())
@@ -78,7 +78,7 @@ func TestNewScriptShellTool_Tool(t *testing.T) {
 }`, string(schema))
 }
 
-func TestNewScriptShellTool_Typo(t *testing.T) {
+func TestNewScript_Typo(t *testing.T) {
 	shellTools := map[string]latest.ScriptShellToolConfig{
 		"docker_images": {
 			Description: "List running Docker containers",
@@ -93,12 +93,12 @@ func TestNewScriptShellTool_Typo(t *testing.T) {
 		},
 	}
 
-	tool, err := NewScriptShellTool(shellTools, nil)
+	tool, err := NewScript(shellTools, nil)
 	require.Nil(t, tool)
 	require.ErrorContains(t, err, "tool 'docker_images' uses undefined args: [image]")
 }
 
-func TestNewScriptShellTool_MissingRequired(t *testing.T) {
+func TestNewScript_MissingRequired(t *testing.T) {
 	shellTools := map[string]latest.ScriptShellToolConfig{
 		"docker_images": {
 			Description: "List running Docker containers",
@@ -113,12 +113,12 @@ func TestNewScriptShellTool_MissingRequired(t *testing.T) {
 		},
 	}
 
-	tool, err := NewScriptShellTool(shellTools, nil)
+	tool, err := NewScript(shellTools, nil)
 	require.Nil(t, tool)
 	require.ErrorContains(t, err, "tool 'docker_images' has required arg 'img' which is not defined in args")
 }
 
-func TestNewScriptShellTool_NumberArg(t *testing.T) {
+func TestNewScript_NumberArg(t *testing.T) {
 	shellTools := map[string]latest.ScriptShellToolConfig{
 		"repeat": {
 			Description: "Repeat a message N times",
@@ -137,7 +137,7 @@ func TestNewScriptShellTool_NumberArg(t *testing.T) {
 		},
 	}
 
-	tool, err := NewScriptShellTool(shellTools, os.Environ())
+	tool, err := NewScript(shellTools, os.Environ())
 	require.NoError(t, err)
 
 	allTools, err := tool.Tools(t.Context())
@@ -172,7 +172,7 @@ func TestScriptShellTool_DropsUndeclaredArgs(t *testing.T) {
 		},
 	}
 
-	tool, err := NewScriptShellTool(shellTools, []string{})
+	tool, err := NewScript(shellTools, []string{})
 	require.NoError(t, err)
 
 	allTools, err := tool.Tools(t.Context())
@@ -206,7 +206,7 @@ func TestScriptShellTool_RejectsNULInValue(t *testing.T) {
 		},
 	}
 
-	tool, err := NewScriptShellTool(shellTools, []string{})
+	tool, err := NewScript(shellTools, []string{})
 	require.NoError(t, err)
 
 	allTools, err := tool.Tools(t.Context())
@@ -223,7 +223,7 @@ func TestScriptShellTool_RejectsNULInValue(t *testing.T) {
 	assert.Contains(t, result.Output, "NUL byte")
 }
 
-func TestNewScriptShellTool_ArgWithoutType(t *testing.T) {
+func TestNewScript_ArgWithoutType(t *testing.T) {
 	shellTools := map[string]latest.ScriptShellToolConfig{
 		"greet": {
 			Description: "Greet someone",
@@ -237,7 +237,7 @@ func TestNewScriptShellTool_ArgWithoutType(t *testing.T) {
 		},
 	}
 
-	tool, err := NewScriptShellTool(shellTools, nil)
+	tool, err := NewScript(shellTools, nil)
 	require.NoError(t, err)
 
 	allTools, err := tool.Tools(t.Context())

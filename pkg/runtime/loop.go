@@ -841,7 +841,7 @@ func (r *LocalRuntime) configureToolsetHandlers(a *agent.Agent, events EventSink
 		// channel; a blocking send after the channel is closed would
 		// crash, and a blocking send when the consumer has gone away
 		// would deadlock.
-		if ragTool, ok := tools.As[*builtinrag.Tool](toolset); ok {
+		if ragTool, ok := tools.As[*builtinrag.ToolSet](toolset); ok {
 			ragTool.SetEventCallback(ragEventForwarder(ragTool.Name(), r, nonBlocking(events).Emit))
 		}
 	}
