@@ -2,7 +2,7 @@
 
 agents:
   root:
-    model: xai/grok-3-mini
+    model: xai/grok-2-latest
     description: A helpful AI assistant powered by Grok
     instruction: |
       You are Grok, a helpful and maximally truthful AI built by xAI.
@@ -12,6 +12,6 @@ agents:
 models:
   grok-model:
     provider: xai
-    model: grok-3-mini
+    model: grok-2-latest
     max_tokens: 131072
     temperature: 0.7
