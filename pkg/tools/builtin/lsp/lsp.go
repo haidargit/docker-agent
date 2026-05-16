@@ -20,6 +20,10 @@ import (
 	"time"
 
 	"github.com/docker/docker-agent/pkg/concurrent"
+	"github.com/docker/docker-agent/pkg/config"
+	"github.com/docker/docker-agent/pkg/config/latest"
+	"github.com/docker/docker-agent/pkg/environment"
+	"github.com/docker/docker-agent/pkg/toolinstall"
 	"github.com/docker/docker-agent/pkg/tools"
 	"github.com/docker/docker-agent/pkg/tools/lifecycle"
 )
@@ -337,6 +341,59 @@ type lspInlayHint struct {
 	Kind         int         `json:"kind,omitempty"`
 	PaddingLeft  bool        `json:"paddingLeft,omitempty"`
 	PaddingRight bool        `json:"paddingRight,omitempty"`
+}
+
+// CreateToolSet is used by the tools registry.
+func CreateToolSet(ctx context.Context, toolset latest.Toolset, _ string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
+	resolvedCommand, err := toolinstall.EnsureCommand(ctx, toolset.Command, toolset.Version)
+	if err != nil {
+		return nil, fmt.Errorf("resolving command %q: %w", toolset.Command, err)
+	}
+
+	env, err := environment.ExpandAll(ctx, environment.ToValues(toolset.Env), runConfig.EnvProvider())
+	if err != nil {
+		return nil, fmt.Errorf("failed to expand the tool's environment variables: %w", err)
+	}
+	env = append(env, os.Environ()...)
+	env = toolinstall.PrependBinDirToEnv(env)
+
+	cwd := resolveToolsetWorkingDir(toolset.WorkingDir, runConfig.WorkingDir)
+	if toolset.WorkingDir != "" {
+		if err := checkDirExists(cwd, "lsp"); err != nil {
+			return nil, err
+		}
+	}
+
+	tool := NewLSPTool(resolvedCommand, toolset.Args, env, cwd, lifecycle.PolicyFromConfig(toolset.Name, toolset.Lifecycle))
+	if len(toolset.FileTypes) > 0 {
+		tool.SetFileTypes(toolset.FileTypes)
+	}
+	return tool, nil
+}
+
+func resolveToolsetWorkingDir(toolsetWorkingDir, defaultWorkingDir string) string {
+	if toolsetWorkingDir != "" {
+		return toolsetWorkingDir
+	}
+	if defaultWorkingDir != "" {
+		return defaultWorkingDir
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return wd
+}
+
+func checkDirExists(dir, kind string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("%s working_dir %q does not exist or is not accessible: %w", kind, dir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s working_dir %q is not a directory", kind, dir)
+	}
+	return nil
 }
 
 // NewLSPTool creates a new LSP tool that connects to an LSP server.

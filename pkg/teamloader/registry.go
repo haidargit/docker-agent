@@ -59,7 +59,7 @@ func NewDefaultToolsetRegistry() ToolsetRegistry {
 			"mcp":               createMCPTool,
 			"api":               api.CreateToolSet,
 			"a2a":               a2a.CreateToolSet,
-			"lsp":               createLSPTool,
+			"lsp":               lsp.CreateToolSet,
 			"user_prompt":       userprompt.CreateToolSet,
 			"openapi":           createOpenAPITool,
 			"model_picker":      createModelPickerTool,
@@ -250,40 +250,6 @@ func createMCPTool(ctx context.Context, toolset latest.Toolset, _ string, runCon
 	default:
 		return nil, errors.New("mcp toolset requires either ref, command, or remote configuration")
 	}
-}
-
-func createLSPTool(ctx context.Context, toolset latest.Toolset, _ string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
-	// Auto-install missing command binary if needed
-	resolvedCommand, err := toolinstall.EnsureCommand(ctx, toolset.Command, toolset.Version)
-	if err != nil {
-		return nil, fmt.Errorf("resolving command %q: %w", toolset.Command, err)
-	}
-
-	env, err := environment.ExpandAll(ctx, environment.ToValues(toolset.Env), runConfig.EnvProvider())
-	if err != nil {
-		return nil, fmt.Errorf("failed to expand the tool's environment variables: %w", err)
-	}
-	env = append(env, os.Environ()...)
-
-	// Prepend tools bin dir to PATH so child processes can find installed tools
-	env = toolinstall.PrependBinDirToEnv(env)
-
-	cwd := resolveToolsetWorkingDir(toolset.WorkingDir, runConfig.WorkingDir)
-
-	// S1: validate the resolved directory exists (if one was specified) so we
-	// surface a clear error now rather than a cryptic exec failure later.
-	if toolset.WorkingDir != "" {
-		if err := checkDirExists(cwd, "lsp"); err != nil {
-			return nil, err
-		}
-	}
-
-	tool := lsp.NewLSPTool(resolvedCommand, toolset.Args, env, cwd, lifecyclePolicyFromConfig(toolset.Name, toolset.Lifecycle))
-	if len(toolset.FileTypes) > 0 {
-		tool.SetFileTypes(toolset.FileTypes)
-	}
-
-	return tool, nil
 }
 
 func createOpenAPITool(ctx context.Context, toolset latest.Toolset, _ string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {

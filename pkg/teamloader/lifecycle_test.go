@@ -77,6 +77,6 @@ func TestParseRestart(t *testing.T) {
 		"always":     lifecycle.RestartAlways,
 	}
 	for in, want := range cases {
-		assert.Equal(t, want, parseRestart(in), "input=%q", in)
+		assert.Equal(t, want, lifecycle.ParseRestart(in), "input=%q", in)
 	}
 }
