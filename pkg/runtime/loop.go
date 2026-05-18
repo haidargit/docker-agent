@@ -362,18 +362,15 @@ func (r *LocalRuntime) runStreamLoop(ctx context.Context, sess *session.Session,
 		if err != nil {
 			slog.DebugContext(ctx, "Failed to get model definition", "error", err)
 		}
-		// We can only compact if we know the limit. Prefer the
-		// models.dev catalogue; fall back to the user-supplied
-		// provider_opts.context_size so local models that aren't
-		// catalogued (e.g. DMR with HuggingFace GGUFs) still benefit
-		// from automatic compaction.
-		var contextLimit int64
-		if m != nil {
-			contextLimit = int64(m.Limit.Context)
-		}
-		if contextLimit <= 0 {
-			contextLimit = providerContextLimit(model)
-		}
+		// We can only compact if we know the context limit.
+		// resolveContextLimit prefers provider_opts.context_size when set
+		// (some providers — notably Docker Model Runner — use it to size
+		// the actual inference context), then falls back to the models.dev
+		// catalogue. The lookup above is reused inside resolveContextLimit
+		// only when context_size isn't supplied; we keep the explicit call
+		// here because m is also threaded into [recordAssistantMessage] for
+		// per-message cost computation.
+		contextLimit := r.resolveContextLimit(ctx, model, modelID)
 		if contextLimit > 0 && r.sessionCompaction && compaction.ShouldCompact(sess.InputTokens, sess.OutputTokens, 0, contextLimit) {
 			r.compactWithReason(ctx, sess, "", compactionReasonThreshold, sink)
 		}
@@ -381,7 +378,7 @@ func (r *LocalRuntime) runStreamLoop(ctx context.Context, sess *session.Session,
 		// Drain steer messages queued while idle or before the first model call
 		// (covers idle-window and first-turn-miss races).
 		if drained, messageCountBeforeSteer := r.drainAndEmitSteered(ctx, sess, sink); drained {
-			r.compactIfNeeded(ctx, sess, a, m, contextLimit, messageCountBeforeSteer, sink)
+			r.compactIfNeeded(ctx, sess, a, contextLimit, messageCountBeforeSteer, sink)
 		}
 
 		// Everything from turn_start onwards is wrapped in a closure so a
@@ -646,7 +643,7 @@ func (r *LocalRuntime) runTurn(
 
 	// Drain steer messages that arrived during tool calls.
 	if drained, _ := r.drainAndEmitSteered(ctx, sess, events); drained {
-		r.compactIfNeeded(ctx, sess, a, m, contextLimit, messageCountBeforeTools, events)
+		r.compactIfNeeded(ctx, sess, a, contextLimit, messageCountBeforeTools, events)
 		endReason = turnEndReasonSteered
 		return turnContinue
 	}
@@ -657,7 +654,7 @@ func (r *LocalRuntime) runTurn(
 
 		// Re-check steer queue: closes the race between the mid-loop drain and this stop.
 		if drained, _ := r.drainAndEmitSteered(ctx, sess, events); drained {
-			r.compactIfNeeded(ctx, sess, a, m, contextLimit, messageCountBeforeTools, events)
+			r.compactIfNeeded(ctx, sess, a, contextLimit, messageCountBeforeTools, events)
 			endReason = turnEndReasonSteered
 			return turnContinue
 		}
@@ -672,7 +669,7 @@ func (r *LocalRuntime) runTurn(
 			userMsg := session.UserMessage(followUp.Content, followUp.MultiContent...)
 			sess.AddMessage(userMsg)
 			events.Emit(UserMessage(followUp.Content, sess.ID, followUp.MultiContent, len(sess.Messages)-1))
-			r.compactIfNeeded(ctx, sess, a, m, contextLimit, messageCountBeforeTools, events)
+			r.compactIfNeeded(ctx, sess, a, contextLimit, messageCountBeforeTools, events)
 			endReason = turnEndReasonContinue
 			return turnContinue // re-enter the loop for a new turn
 		}
@@ -681,7 +678,7 @@ func (r *LocalRuntime) runTurn(
 		return turnExit
 	}
 
-	r.compactIfNeeded(ctx, sess, a, m, contextLimit, messageCountBeforeTools, events)
+	r.compactIfNeeded(ctx, sess, a, contextLimit, messageCountBeforeTools, events)
 	endReason = turnEndReasonContinue
 	return turnContinue
 }
@@ -780,12 +777,10 @@ func (r *LocalRuntime) compactIfNeeded(
 	ctx context.Context,
 	sess *session.Session,
 	a *agent.Agent,
-	m *modelsdev.Model,
 	contextLimit int64,
 	messageCountBefore int,
 	events EventSink,
 ) {
-	_ = m // models.dev definition isn't required: contextLimit may have been derived from provider_opts.context_size when the model is missing from the catalogue.
 	if !r.sessionCompaction || contextLimit <= 0 {
 		return
 	}

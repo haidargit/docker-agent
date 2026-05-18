@@ -122,15 +122,18 @@ func TestCompactionContextLimit_FallsBackToProviderOpts(t *testing.T) {
 		"context limit must fall back to provider_opts.context_size when models.dev has no entry")
 }
 
-// TestCompactionContextLimit_PrefersModelsDev verifies that a present
-// models.dev limit wins over provider_opts.context_size. This keeps
-// existing behaviour intact for catalogued models.
-func TestCompactionContextLimit_PrefersModelsDev(t *testing.T) {
+// TestCompactionContextLimit_PrefersProviderOpts verifies that an explicit
+// user-supplied provider_opts.context_size is the authoritative limit, even
+// when the models.dev catalogue has its own entry. This is what the user is
+// asking for — DMR allocates exactly context_size bytes for the inference
+// context, and a user setting a smaller-than-catalogue value (cost / memory
+// tuning) wants compaction to respect that.
+func TestCompactionContextLimit_PrefersProviderOpts(t *testing.T) {
 	t.Parallel()
 
 	prov := &providerOptsProvider{
 		id:   "openai/gpt-5",
-		opts: map[string]any{"context_size": 1}, // user can't lie us into a tiny limit
+		opts: map[string]any{"context_size": 8192},
 	}
 	root := agent.New("root", "test", agent.WithModel(prov))
 	tm := team.New(team.WithAgents(root))
@@ -139,8 +142,25 @@ func TestCompactionContextLimit_PrefersModelsDev(t *testing.T) {
 	require.NoError(t, err)
 
 	got := rt.compactionContextLimit(t.Context(), root)
-	assert.Equal(t, int64(200_000), got,
-		"models.dev limit must take precedence over provider_opts.context_size")
+	assert.Equal(t, int64(8192), got,
+		"explicit provider_opts.context_size must take precedence over the catalogue")
+}
+
+// TestCompactionContextLimit_FallsBackToCatalogue verifies that when the
+// user has not supplied context_size, the runtime uses the models.dev
+// catalogue limit. This is the path most hosted-model users hit.
+func TestCompactionContextLimit_FallsBackToCatalogue(t *testing.T) {
+	t.Parallel()
+
+	prov := &providerOptsProvider{id: "openai/gpt-5"} // no opts
+	root := agent.New("root", "test", agent.WithModel(prov))
+	tm := team.New(team.WithAgents(root))
+
+	rt, err := NewLocalRuntime(tm, WithModelStore(mockModelStoreWithLimit{limit: 200_000}))
+	require.NoError(t, err)
+
+	got := rt.compactionContextLimit(t.Context(), root)
+	assert.Equal(t, int64(200_000), got)
 }
 
 // TestCompactionContextLimit_NoSourcesYieldsZero verifies the legacy

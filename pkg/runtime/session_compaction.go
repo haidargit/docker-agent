@@ -12,6 +12,7 @@ import (
 	"github.com/docker/docker-agent/pkg/hooks"
 	"github.com/docker/docker-agent/pkg/model/provider"
 	"github.com/docker/docker-agent/pkg/model/provider/options"
+	"github.com/docker/docker-agent/pkg/modelsdev"
 	"github.com/docker/docker-agent/pkg/runtime/compactor"
 	"github.com/docker/docker-agent/pkg/session"
 	"github.com/docker/docker-agent/pkg/team"
@@ -165,12 +166,9 @@ func summaryFromHook(sess *session.Session, a *agent.Agent, pre *hooks.Result) *
 // hook may supply its own summary and never need the model definition.
 // The LLM strategy itself enforces ContextLimit > 0.
 //
-// When the modelsdev definition is unavailable (e.g. a Docker Model
-// Runner model that isn't catalogued, like a HuggingFace GGUF), the
-// limit falls back to the user-supplied [provider_opts.context_size].
-// This mirrors what DMR itself uses to size the inference context, so
-// compaction triggers (proactive 90% threshold and post-overflow
-// recovery) work for local models without a models.dev entry.
+// See [LocalRuntime.resolveContextLimit] for the resolution order; we
+// pass the cloned summary-call provider so its provider_opts (which
+// match the underlying model) are considered.
 func (r *LocalRuntime) compactionContextLimit(ctx context.Context, a *agent.Agent) int64 {
 	if a == nil || a.Model(ctx) == nil {
 		return 0
@@ -179,11 +177,29 @@ func (r *LocalRuntime) compactionContextLimit(ctx context.Context, a *agent.Agen
 		options.WithStructuredOutput(nil),
 		options.WithMaxTokens(compactor.MaxSummaryTokens),
 	)
-	m, err := r.modelsStore.GetModel(ctx, summaryModel.ID())
+	return r.resolveContextLimit(ctx, summaryModel, summaryModel.ID())
+}
+
+// resolveContextLimit resolves the effective context window size for a
+// model. Resolution order:
+//
+//  1. The user-supplied [provider_opts.context_size], when set, is
+//     authoritative. Some providers (notably Docker Model Runner) use
+//     it to size the actual inference context, so we plan against the
+//     same number the engine will enforce. This also makes compaction
+//     work for local models that aren't catalogued in models.dev (e.g.
+//     a HuggingFace GGUF).
+//  2. Otherwise, the models.dev catalogue limit looked up by id.
+//  3. Otherwise, 0 (caller treats this as "can't compact").
+func (r *LocalRuntime) resolveContextLimit(ctx context.Context, p provider.Provider, id modelsdev.ID) int64 {
+	if n := providerContextLimit(p); n > 0 {
+		return n
+	}
+	m, err := r.modelsStore.GetModel(ctx, id)
 	if err == nil && m != nil && m.Limit.Context > 0 {
 		return int64(m.Limit.Context)
 	}
-	return providerContextLimit(summaryModel)
+	return 0
 }
 
 // providerContextLimit reads [provider_opts.context_size] from a
