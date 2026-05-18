@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -68,6 +70,10 @@ func (c *diskCache) cacheDir(baseURL, skillName string) string {
 }
 
 // Get returns the cached content for a file if it exists and is not expired.
+// Treats missing-file errors as a cache miss (returns false). Other I/O
+// errors (e.g. EACCES, corrupt JSON) are surfaced through a debug log so
+// they don't masquerade as a benign refetch trigger but still don't break
+// the caller — a refetch is the right fallback.
 func (c *diskCache) Get(baseURL, skillName, filePath string) (string, bool) {
 	dir := c.cacheDir(baseURL, skillName)
 	contentPath := filepath.Join(dir, filePath)
@@ -75,6 +81,9 @@ func (c *diskCache) Get(baseURL, skillName, filePath string) (string, bool) {
 
 	meta, err := c.readMetadata(metaPath)
 	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			slog.Debug("Skill cache metadata unreadable, treating as miss", "path", metaPath, "error", err)
+		}
 		return "", false
 	}
 
@@ -84,6 +93,9 @@ func (c *diskCache) Get(baseURL, skillName, filePath string) (string, bool) {
 
 	data, err := os.ReadFile(contentPath)
 	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			slog.Debug("Skill cache content unreadable, treating as miss", "path", contentPath, "error", err)
+		}
 		return "", false
 	}
 
@@ -91,7 +103,8 @@ func (c *diskCache) Get(baseURL, skillName, filePath string) (string, bool) {
 }
 
 // FetchAndStore downloads a file from the given URL and stores it in the cache.
-// It respects Cache-Control headers to determine expiry.
+// It respects Cache-Control headers to determine expiry, and skips the disk
+// write entirely when the response is marked no-store (RFC 9111 §5.2.2.5).
 func (c *diskCache) FetchAndStore(ctx context.Context, baseURL, skillName, filePath, fileURL string) (string, error) {
 	slog.DebugContext(ctx, "Fetching remote skill file", "url", fileURL)
 
@@ -110,7 +123,17 @@ func (c *diskCache) FetchAndStore(ctx context.Context, baseURL, skillName, fileP
 		return "", fmt.Errorf("reading %s: %w", fileURL, err)
 	}
 
-	expiresAt := parseCacheExpiry(resp.Header.Get("Cache-Control"))
+	directive := parseCacheControl(resp.Header.Get("Cache-Control"))
+
+	// Honour no-store: never persist the response. This matters because the
+	// fetched content is fed to the LLM as instructions, so persisting an
+	// upstream-marked-private response on disk under ~/.cagent is both a
+	// privacy hazard (lingering sensitive content) and a correctness bug
+	// per RFC 9111 §5.2.2.5.
+	if directive.noStore {
+		slog.DebugContext(ctx, "Cache-Control no-store: skipping disk write", "url", fileURL)
+		return string(body), nil
+	}
 
 	dir := c.cacheDir(baseURL, skillName)
 	contentPath := filepath.Join(dir, filePath)
@@ -127,7 +150,7 @@ func (c *diskCache) FetchAndStore(ctx context.Context, baseURL, skillName, fileP
 	meta := cacheMetadata{
 		URL:       fileURL,
 		CachedAt:  time.Now(),
-		ExpiresAt: expiresAt,
+		ExpiresAt: directive.expiresAt(),
 	}
 	metaJSON, _ := json.Marshal(meta)
 	if err := os.WriteFile(metaPath, metaJSON, 0o600); err != nil {
@@ -152,28 +175,55 @@ func (c *diskCache) readMetadata(metaPath string) (cacheMetadata, error) {
 
 const defaultCacheTTL = 1 * time.Hour
 
-// parseCacheExpiry extracts the expiry time from a Cache-Control header value.
-// Falls back to defaultCacheTTL if the header is missing or unparseable.
-func parseCacheExpiry(cacheControl string) time.Time {
-	if cacheControl == "" {
-		return time.Now().Add(defaultCacheTTL)
+// cacheDirective is the parsed subset of Cache-Control we care about.
+type cacheDirective struct {
+	noStore bool
+	noCache bool
+	// hasMaxAge is true when the header explicitly carried max-age=N.
+	hasMaxAge bool
+	maxAge    time.Duration
+}
+
+// expiresAt returns the absolute time after which the cached entry must
+// not be served. no-cache forces immediate expiry — the response may be
+// stored, but every read must re-validate (we currently approximate this
+// as a refetch since conditional-GET support isn't implemented yet).
+func (d cacheDirective) expiresAt() time.Time {
+	now := time.Now()
+	if d.noCache {
+		return now
+	}
+	if d.hasMaxAge {
+		return now.Add(d.maxAge)
+	}
+	return now.Add(defaultCacheTTL)
+}
+
+// parseCacheControl extracts the directives we honour from a Cache-Control
+// header value. Unknown directives are ignored; an empty header yields the
+// zero value, which falls back to defaultCacheTTL via expiresAt().
+func parseCacheControl(header string) cacheDirective {
+	var d cacheDirective
+	if header == "" {
+		return d
 	}
 
-	for directive := range strings.SplitSeq(cacheControl, ",") {
+	for directive := range strings.SplitSeq(header, ",") {
 		directive = strings.TrimSpace(directive)
 
-		if strings.EqualFold(directive, "no-store") || strings.EqualFold(directive, "no-cache") {
-			// Still cache, but with zero TTL so it's refetched next time
-			return time.Now()
-		}
-
-		if strings.HasPrefix(strings.ToLower(directive), "max-age=") {
+		switch {
+		case strings.EqualFold(directive, "no-store"):
+			d.noStore = true
+		case strings.EqualFold(directive, "no-cache"):
+			d.noCache = true
+		case strings.HasPrefix(strings.ToLower(directive), "max-age="):
 			ageStr := directive[len("max-age="):]
 			if seconds, err := strconv.ParseInt(ageStr, 10, 64); err == nil && seconds >= 0 {
-				return time.Now().Add(time.Duration(seconds) * time.Second)
+				d.hasMaxAge = true
+				d.maxAge = time.Duration(seconds) * time.Second
 			}
 		}
 	}
 
-	return time.Now().Add(defaultCacheTTL)
+	return d
 }
