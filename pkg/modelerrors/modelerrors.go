@@ -76,19 +76,51 @@ const (
 	DefaultCooldown = 1 * time.Minute
 )
 
+// OverflowKind classifies the cause of a context overflow, so the runtime
+// and UI can react differently to each shape.
+//
+//   - [OverflowKindTokens]: the accumulated conversation exceeds the model's
+//     context window. Token-count rejection. Compaction can usually help.
+//   - [OverflowKindWire]: the request body exceeds the provider's wire-level
+//     limit (e.g. Anthropic's 32 MB cap, gateway 413s). Compaction usually
+//     CANNOT help because the offending single turn still has to be sent.
+//   - [OverflowKindMedia]: an image, PDF, or similar attachment in the
+//     conversation exceeds the provider's media constraints (size, page
+//     count, dimensions).
+type OverflowKind string
+
+const (
+	OverflowKindTokens OverflowKind = "tokens"
+	OverflowKindWire   OverflowKind = "wire"
+	OverflowKindMedia  OverflowKind = "media"
+)
+
 // ContextOverflowError wraps an underlying error to indicate that the failure
-// was caused by the conversation context exceeding the model's context window.
+// was caused by the conversation context exceeding some provider-side limit.
 // This is used to trigger auto-compaction in the runtime loop instead of
 // surfacing raw HTTP errors to the user.
+//
+// Kind classifies the specific shape of the overflow ([OverflowKindTokens] by
+// default for backwards compatibility). Use [NewContextOverflowError] to have
+// it set automatically by classification, or build the struct directly to
+// force a Kind.
 type ContextOverflowError struct {
 	Underlying error
+	Kind       OverflowKind
 }
 
 // NewContextOverflowError creates a ContextOverflowError wrapping the given
-// underlying error. Use this constructor rather than building the struct
-// directly so that future field additions don't break callers.
+// underlying error. The Kind is inferred from the underlying error via
+// [classifyOverflow]; if classification yields no result, Kind defaults to
+// [OverflowKindTokens] (the historical behaviour). Use this constructor
+// rather than building the struct directly so future field additions don't
+// break callers.
 func NewContextOverflowError(underlying error) *ContextOverflowError {
-	return &ContextOverflowError{Underlying: underlying}
+	kind := classifyOverflow(underlying)
+	if kind == "" {
+		kind = OverflowKindTokens
+	}
+	return &ContextOverflowError{Underlying: underlying, Kind: kind}
 }
 
 func (e *ContextOverflowError) Error() string {
@@ -102,60 +134,155 @@ func (e *ContextOverflowError) Unwrap() error {
 	return e.Underlying
 }
 
-// contextOverflowPatterns contains error message substrings that indicate the
-// prompt/context exceeds the model's context window. These patterns are checked
-// case-insensitively against error messages from various providers.
-var contextOverflowPatterns = []string{
-	"prompt is too long",
-	"maximum context length",
-	"context length exceeded",
-	"context_length_exceeded",
-	"max_tokens must be greater than",
+// tokenOverflowPatterns matches token-count rejections from various providers.
+// Best-effort substring match (case-insensitive) against the error message.
+// Provider error wording is not contractual and drifts over time; this list
+// is heuristics derived from observed errors. Adding a provider only requires
+// appending a phrase.
+var tokenOverflowPatterns = []string{
+	"prompt is too long",                // Anthropic, Vertex (with Anthropic body)
+	"prompt too long",                   // Ollama ("prompt too long; exceeded ...")
+	"maximum context length",            // OpenAI, OpenRouter, DeepSeek, vLLM
+	"context length exceeded",           // OpenAI legacy
+	"context_length_exceeded",           // OpenAI structured code
+	"input is too long",                 // Bedrock
+	"input token count",                 // Gemini ("...exceeds the maximum")
+	"exceeds the context window",        // OpenAI Responses API
+	"reduce the length of the messages", // Groq
+	"exceeded model token limit",        // Kimi, Moonshot
+	"context window exceeds limit",      // MiniMax
+	"model_context_window_exceeded",     // z.ai
+	"max_tokens must be greater than",   // Anthropic edge case: thinking-budget cascade
 	"maximum number of tokens",
 	"content length exceeds",
-	"request too large",
-	"payload too large",
-	"input is too long",
 	"exceeds the model's max token",
 	"token limit",
 	"reduce your prompt",
-	"reduce the length",
 }
 
-// IsContextOverflowError checks whether the error indicates the conversation
-// context has exceeded the model's context window. It inspects both structured
-// SDK error types and raw error message patterns.
-//
-// Recognised patterns include:
-//   - Anthropic 400 "prompt is too long: N tokens > M maximum"
-//   - Anthropic 400 "max_tokens must be greater than thinking.budget_tokens"
-//     (emitted when the prompt is so large that max_tokens can't accommodate
-//     the thinking budget — a proxy for context overflow)
-//   - OpenAI 400 "maximum context length" / "context_length_exceeded"
-//   - Anthropic 500 that is actually a context overflow (heuristic: the error
-//     message is opaque but the conversation was already near the limit)
-//
-// This function intentionally does NOT match generic 500 errors; callers
-// that want to treat an opaque 500 as overflow must check separately with
-// additional context (e.g., session token counts).
+// wireOverflowPatterns matches wire-level rejections — the whole request body
+// is too big to send regardless of context window. These trigger different
+// recovery than token overflows (compaction-as-retry won't help when the
+// latest turn alone is over the wire cap).
+var wireOverflowPatterns = []string{
+	"request_too_large",        // Anthropic structured error.type
+	"request too large",        // Anthropic prose
+	"payload too large",        // HTTP 413 status text
+	"request entity too large", // RFC 7231 status text
+}
+
+// mediaOverflowPatterns matches media-specific rejections (image too big, PDF
+// too many pages, etc.). Distinguished from token/wire because recovery
+// strategies differ — stripping media from history can help here.
+var mediaOverflowPatterns = []string{
+	"image exceeds",           // Anthropic
+	"image dimensions exceed", // Anthropic many-image
+	"pdf pages",               // "maximum of N PDF pages" — Anthropic
+}
+
+// IsContextOverflowError reports whether err indicates the conversation
+// exceeded a provider-side limit (token window, wire size, or media size).
+// Use [OverflowKindOf] to distinguish the three shapes.
 func IsContextOverflowError(err error) bool {
 	if err == nil {
 		return false
 	}
-
-	// Already wrapped
 	if _, ok := errors.AsType[*ContextOverflowError](err); ok {
 		return true
 	}
+	return classifyOverflow(err) != ""
+}
 
-	errMsg := strings.ToLower(err.Error())
-	for _, pattern := range contextOverflowPatterns {
-		if strings.Contains(errMsg, pattern) {
-			return true
+// OverflowKindOf returns the [OverflowKind] of err, or "" if it isn't an
+// overflow error. If err is already wrapped in a [*ContextOverflowError]
+// with a non-empty Kind, that Kind is returned; otherwise classification
+// runs on the unwrapped error.
+func OverflowKindOf(err error) OverflowKind {
+	if err == nil {
+		return ""
+	}
+	if coe, ok := errors.AsType[*ContextOverflowError](err); ok {
+		if coe.Kind != "" {
+			return coe.Kind
+		}
+		// Legacy wrap with no Kind — try classifying the underlying.
+		if coe.Underlying != nil {
+			if k := classifyOverflow(coe.Underlying); k != "" {
+				return k
+			}
+		}
+		return OverflowKindTokens
+	}
+	return classifyOverflow(err)
+}
+
+// classifyOverflow inspects err for overflow signals and returns the matching
+// [OverflowKind], or "" if err is not an overflow error.
+//
+// The classifier runs two tiers, in order:
+//
+//	Tier 1 — structured signals (high confidence):
+//	  * body.error.type == "request_too_large"     → OverflowKindWire
+//	  * body.error.code == "context_length_exceeded" → OverflowKindTokens
+//	  * HTTP status 413                            → OverflowKindWire
+//
+//	Tier 2 — substring patterns (best-effort fallback):
+//	  * mediaOverflowPatterns → OverflowKindMedia
+//	  * wireOverflowPatterns  → OverflowKindWire
+//	  * tokenOverflowPatterns → OverflowKindTokens
+//
+// Tier 1 wins when both fire. Within Tier 2, media is checked first because
+// it is the most specific; wire before tokens because some wire signals
+// ("request too large") textually overlap with token-overflow phrasing in a
+// way that benefits from the wire match coming first.
+func classifyOverflow(err error) OverflowKind {
+	if err == nil {
+		return ""
+	}
+	// Already-wrapped errors carry their Kind; respect it.
+	if coe, ok := errors.AsType[*ContextOverflowError](err); ok && coe.Kind != "" {
+		return coe.Kind
+	}
+
+	raw := err.Error()
+
+	// Tier 1: structured body fields.
+	if body := firstJSONObject(raw); body != nil {
+		var parsed providerErrorBody
+		if json.Unmarshal(body, &parsed) == nil && parsed.Error != nil {
+			if parsed.Error.Type == "request_too_large" {
+				return OverflowKindWire
+			}
+			if code := scalarString(parsed.Error.Code); code == "context_length_exceeded" {
+				return OverflowKindTokens
+			}
 		}
 	}
 
-	return false
+	// Tier 1: HTTP status code (413 → wire).
+	if se, ok := errors.AsType[*StatusError](err); ok && se.StatusCode == http.StatusRequestEntityTooLarge {
+		return OverflowKindWire
+	}
+
+	// Tier 2: substring fallback. Media first (most specific), then wire,
+	// then tokens.
+	msg := strings.ToLower(raw)
+	for _, p := range mediaOverflowPatterns {
+		if strings.Contains(msg, p) {
+			return OverflowKindMedia
+		}
+	}
+	for _, p := range wireOverflowPatterns {
+		if strings.Contains(msg, p) {
+			return OverflowKindWire
+		}
+	}
+	for _, p := range tokenOverflowPatterns {
+		if strings.Contains(msg, p) {
+			return OverflowKindTokens
+		}
+	}
+	return ""
 }
 
 // statusCodeRegex matches HTTP status codes in error messages (e.g., "429", "500", ": 429 ")
@@ -437,16 +564,26 @@ func ClassifyModelError(err error) (retryable, rateLimited bool, retryAfter time
 }
 
 // FormatError returns a user-friendly error message for model errors.
-// Context overflow gets a dedicated actionable message; other errors fall
+// Overflow errors get a kind-specific actionable message; other errors fall
 // through to err.Error(). For HTTP errors that text comes from *StatusError,
 // which itself extracts structured provider details (see parseProviderError).
+//
+// The messages are provider-agnostic by design: docker-agent supports many
+// LLM providers and the cap that triggered the rejection is a deployment
+// detail of the provider, not something the user can act on by name.
 func FormatError(err error) string {
 	if err == nil {
 		return ""
 	}
 
-	// Context overflow gets a dedicated, actionable message.
-	if _, ok := errors.AsType[*ContextOverflowError](err); ok {
+	switch OverflowKindOf(err) {
+	case OverflowKindWire:
+		return "Your message is too large for the AI provider. " +
+			"Try a smaller paste, attach the file separately, or split the content."
+	case OverflowKindMedia:
+		return "An image or file in this conversation is too large for the AI provider. " +
+			"Try a smaller file or remove it from context."
+	case OverflowKindTokens:
 		return "The conversation has exceeded the model's context window and automatic compaction is not enabled. " +
 			"Try running /compact to reduce the conversation size, or start a new session."
 	}

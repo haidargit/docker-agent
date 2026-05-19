@@ -159,6 +159,237 @@ func TestIsContextOverflowError(t *testing.T) {
 	}
 }
 
+func TestClassifyOverflow(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want OverflowKind
+	}{
+		// ── Tier 1: structured ──
+		{
+			name: "anthropic 413 with request_too_large body",
+			err: &StatusError{StatusCode: 413, Err: errors.New(
+				`POST "https://api.anthropic.com/v1/messages": 413 Payload Too Large {"type":"error","error":{"type":"request_too_large","message":"Request exceeds 32MB limit"}}`)},
+			want: OverflowKindWire,
+		},
+		{
+			name: "openai context_length_exceeded structured code",
+			err: errors.New(
+				`POST "https://api.openai.com/v1/chat/completions": 400 Bad Request {"error":{"message":"maximum context length is 128000 tokens","type":"invalid_request_error","code":"context_length_exceeded"}}`),
+			want: OverflowKindTokens,
+		},
+		{
+			name: "bare 413 with empty body still classifies as wire",
+			err:  &StatusError{StatusCode: 413, Err: errors.New(`413 Payload Too Large`)},
+			want: OverflowKindWire,
+		},
+		{
+			name: "vertex 413 with prompt-too-long body — wire wins via 413",
+			err: &StatusError{StatusCode: 413, Err: errors.New(
+				`413 Payload Too Large {"error":{"message":"Prompt is too long"}}`)},
+			want: OverflowKindWire,
+		},
+
+		// ── Tier 2: prose patterns by provider ──
+		{
+			name: "anthropic 400 prompt too long",
+			err: errors.New(
+				`POST "https://api.anthropic.com/v1/messages": 400 Bad Request {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 137500 tokens > 135000 maximum"}}`),
+			want: OverflowKindTokens,
+		},
+		{
+			name: "gemini input token count exceeds maximum",
+			err: errors.New(
+				`googleapi: Error 400: input token count 200000 exceeds the maximum of 128000`),
+			want: OverflowKindTokens,
+		},
+		{
+			name: "bedrock input is too long",
+			err:  errors.New(`ValidationException: input is too long for requested model`),
+			want: OverflowKindTokens,
+		},
+		{
+			name: "groq reduce the length",
+			err:  errors.New(`please reduce the length of the messages or completion`),
+			want: OverflowKindTokens,
+		},
+		{
+			name: "mistral via prose",
+			err:  errors.New(`prompt is too long for model with 32768 maximum context length`),
+			want: OverflowKindTokens,
+		},
+		{
+			name: "openai responses API",
+			err:  errors.New(`This conversation exceeds the context window for this model`),
+			want: OverflowKindTokens,
+		},
+		{
+			name: "ollama prose",
+			err:  errors.New(`prompt too long; exceeded max context length`),
+			want: OverflowKindTokens,
+		},
+		{
+			name: "z.ai non-standard finish reason as error text",
+			err:  errors.New(`finish_reason: model_context_window_exceeded`),
+			want: OverflowKindTokens,
+		},
+		{
+			name: "anthropic thinking-budget cascade (proxy for overflow)",
+			err:  errors.New(`max_tokens must be greater than thinking.budget_tokens`),
+			want: OverflowKindTokens,
+		},
+
+		// ── Tier 2: wire patterns ──
+		{
+			name: "anthropic prose request too large",
+			err:  errors.New(`request too large`),
+			want: OverflowKindWire,
+		},
+
+		// ── Tier 2: media patterns ──
+		{
+			name: "anthropic image exceeds size",
+			err: errors.New(
+				`400 Bad Request {"error":{"message":"image exceeds 5 MB maximum: 5316852 bytes > 5242880 bytes"}}`),
+			want: OverflowKindMedia,
+		},
+		{
+			name: "anthropic many-image dimensions",
+			err:  errors.New(`image dimensions exceed many-image request limit (2000px)`),
+			want: OverflowKindMedia,
+		},
+		{
+			name: "anthropic PDF pages limit",
+			err:  errors.New(`request must have a maximum of 100 PDF pages`),
+			want: OverflowKindMedia,
+		},
+
+		// ── Non-overflow errors ──
+		{
+			name: "rate limit is not overflow",
+			err:  &StatusError{StatusCode: 429, Err: errors.New(`rate_limit_error`)},
+			want: "",
+		},
+		{
+			name: "500 server error is not overflow",
+			err:  &StatusError{StatusCode: 500, Err: errors.New(`internal server error`)},
+			want: "",
+		},
+		{
+			name: "auth error is not overflow",
+			err:  errors.New(`401 unauthorized: invalid api key`),
+			want: "",
+		},
+		{
+			name: "nil",
+			err:  nil,
+			want: "",
+		},
+
+		// ── Wrapped errors ──
+		{
+			name: "already wrapped with Kind preserves Kind",
+			err:  &ContextOverflowError{Underlying: errors.New("anything"), Kind: OverflowKindWire},
+			want: OverflowKindWire,
+		},
+		{
+			name: "errors.As reaches wrapped Kind",
+			err: fmt.Errorf("all models failed: %w",
+				&ContextOverflowError{Underlying: errors.New("anything"), Kind: OverflowKindMedia}),
+			want: OverflowKindMedia,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := classifyOverflow(tt.err)
+			assert.Equal(t, tt.want, got, "classifyOverflow(%v)", tt.err)
+		})
+	}
+}
+
+func TestOverflowKindOf(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns stored Kind on wrapped error", func(t *testing.T) {
+		t.Parallel()
+		err := &ContextOverflowError{Underlying: errors.New("anything"), Kind: OverflowKindWire}
+		assert.Equal(t, OverflowKindWire, OverflowKindOf(err))
+	})
+
+	t.Run("classifies underlying when wrap has no Kind", func(t *testing.T) {
+		t.Parallel()
+		// Legacy wrap: Kind left empty, Underlying carries the signal.
+		err := &ContextOverflowError{Underlying: errors.New("prompt is too long")}
+		assert.Equal(t, OverflowKindTokens, OverflowKindOf(err))
+	})
+
+	t.Run("falls back to tokens on legacy wrap with no signal", func(t *testing.T) {
+		t.Parallel()
+		err := &ContextOverflowError{Underlying: errors.New("opaque")}
+		assert.Equal(t, OverflowKindTokens, OverflowKindOf(err))
+	})
+
+	t.Run("returns empty on non-overflow error", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, OverflowKind(""), OverflowKindOf(errors.New("rate limited")))
+		assert.Equal(t, OverflowKind(""), OverflowKindOf(nil))
+	})
+
+	t.Run("NewContextOverflowError sets Kind from underlying", func(t *testing.T) {
+		t.Parallel()
+		// Anthropic 413 with structured body → wire
+		under := &StatusError{StatusCode: 413, Err: errors.New(
+			`413 Payload Too Large {"type":"error","error":{"type":"request_too_large","message":"too big"}}`)}
+		wrapped := NewContextOverflowError(under)
+		assert.Equal(t, OverflowKindWire, wrapped.Kind)
+
+		// Token-overflow prose → tokens
+		wrapped = NewContextOverflowError(errors.New("prompt is too long"))
+		assert.Equal(t, OverflowKindTokens, wrapped.Kind)
+
+		// Image rejection → media
+		wrapped = NewContextOverflowError(errors.New("image exceeds 5 MB maximum"))
+		assert.Equal(t, OverflowKindMedia, wrapped.Kind)
+
+		// Unclassifiable underlying → tokens (safe historical default)
+		wrapped = NewContextOverflowError(errors.New("opaque"))
+		assert.Equal(t, OverflowKindTokens, wrapped.Kind)
+	})
+}
+
+func TestFormatError_OverflowKinds(t *testing.T) {
+	t.Parallel()
+
+	t.Run("wire overflow surfaces request-too-large message", func(t *testing.T) {
+		t.Parallel()
+		err := &StatusError{StatusCode: 413, Err: errors.New(`Payload Too Large`)}
+		msg := FormatError(err)
+		assert.Contains(t, msg, "too large")
+		assert.NotContains(t, msg, "/compact")
+		assert.NotContains(t, msg, "context window")
+	})
+
+	t.Run("media overflow surfaces image-too-large message", func(t *testing.T) {
+		t.Parallel()
+		err := errors.New(`image exceeds 5 MB maximum: 5316852 bytes > 5242880 bytes`)
+		msg := FormatError(err)
+		assert.Contains(t, msg, "image or file")
+		assert.NotContains(t, msg, "/compact")
+	})
+
+	t.Run("token overflow keeps the /compact hint", func(t *testing.T) {
+		t.Parallel()
+		err := errors.New(`prompt is too long: 200000 tokens > 128000 maximum`)
+		msg := FormatError(err)
+		assert.Contains(t, msg, "context window")
+		assert.Contains(t, msg, "/compact")
+	})
+}
+
 func TestContextOverflowError(t *testing.T) {
 	t.Parallel()
 

@@ -193,8 +193,17 @@ func (r *LocalRuntime) handleStreamError(
 // structured error events. The classification mirrors [modelerrors]
 // but reduces the granularity to a small set of codes that external
 // consumers can act on.
+//
+// Overflow errors are split by [modelerrors.OverflowKind] so the client
+// can render kind-specific messages (e.g. "request too large" vs "context
+// window exceeded") instead of one generic string.
 func classifyErrorCode(err error) string {
-	if modelerrors.IsContextOverflowError(err) {
+	switch modelerrors.OverflowKindOf(err) {
+	case modelerrors.OverflowKindWire:
+		return ErrorCodeRequestTooLarge
+	case modelerrors.OverflowKindMedia:
+		return ErrorCodeMediaTooLarge
+	case modelerrors.OverflowKindTokens:
 		return ErrorCodeContextExceeded
 	}
 	_, rateLimited, _ := modelerrors.ClassifyModelError(err)
