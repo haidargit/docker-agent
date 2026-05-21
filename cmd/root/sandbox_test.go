@@ -79,3 +79,29 @@ func TestDockerAgentArgs_PreservesUserYolo(t *testing.T) {
 	}
 	assert.Equal(t, 1, yoloCount, "--yolo should not be duplicated, got: %v", got)
 }
+
+func TestGatewayHostPort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"empty", "", ""},
+		{"bare host", "example.com", "example.com"},
+		{"bare authority", "example.com:443", "example.com:443"},
+		{"https URL", "https://example.com/proxy", "example.com"},
+		{"https URL with port", "https://example.com:8443/proxy", "example.com:8443"},
+		{"production gateway", "https://ai-backend-service.docker.com/proxy", "ai-backend-service.docker.com"},
+		{"staging gateway with path", "https://ai-backend-service-stage.docker.com/proxy", "ai-backend-service-stage.docker.com"},
+		{"bare authority with path", "example.com:443/proxy", "example.com:443"},
+		{"bare authority with query", "example.com:443?foo=bar", "example.com:443"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, gatewayHostPort(tt.raw))
+		})
+	}
+}

@@ -1,8 +1,12 @@
 package sandbox
 
 import (
+	"context"
+	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // Backend describes how to invoke sandbox CLI commands.
@@ -20,6 +24,13 @@ type Backend struct {
 	// "sandboxes"; the field stays for forward-compatibility if either
 	// backend ever drifts again.
 	vmListKey string
+	// allowHostsArgs builds the argv that adds an allow-network-host
+	// rule scoped to a single sandbox. The two backends spell the same
+	// operation differently — sbx exposes "sbx policy allow network
+	// SANDBOX HOSTS" while docker exposes "docker sandbox network
+	// proxy SANDBOX --allow-host HOST". Returning the args lets the
+	// shared exec wrapper handle env / logging the same way for both.
+	allowHostsArgs func(name string, hosts []string) []string
 }
 
 // NewBackend returns the appropriate backend.  When preferSbx is true
@@ -39,6 +50,14 @@ func dockerSandboxBackend() *Backend {
 		program:   "docker",
 		prefix:    []string{"sandbox"},
 		vmListKey: "sandboxes",
+		allowHostsArgs: func(name string, hosts []string) []string {
+			// docker sandbox network proxy SANDBOX --allow-host HOST [--allow-host HOST ...]
+			args := []string{"sandbox", "network", "proxy", name}
+			for _, h := range hosts {
+				args = append(args, "--allow-host", h)
+			}
+			return args
+		},
 	}
 }
 
@@ -48,7 +67,38 @@ func sbxBackend() *Backend {
 		prefix:    nil,
 		extraEnv:  []string{"DOCKER_CLI_PLUGIN_ORIGINAL_CLI_COMMAND="},
 		vmListKey: "sandboxes",
+		allowHostsArgs: func(name string, hosts []string) []string {
+			// sbx policy allow network SANDBOX comma,separated,hosts
+			return []string{"policy", "allow", "network", name, strings.Join(hosts, ",")}
+		},
 	}
+}
+
+// AllowHosts adds a sandbox-scoped network allow rule for each entry
+// in hosts. Hosts may carry an optional ":port" suffix (e.g.
+// "api.example.com:443"). Returns a non-fatal error: callers usually
+// log and continue, since a partial failure (e.g. a host already
+// allowed by an earlier rule) shouldn't keep the sandbox from
+// running.
+func (b *Backend) AllowHosts(ctx context.Context, name string, hosts []string) error {
+	if name == "" || len(hosts) == 0 {
+		return nil
+	}
+	if b.allowHostsArgs == nil {
+		return fmt.Errorf("backend %q does not support per-sandbox network allowlists", b.program)
+	}
+
+	args := b.allowHostsArgs(name, hosts)
+	cmd := exec.CommandContext(ctx, b.program, args...)
+	b.applyEnv(cmd)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s %s: %w (output: %s)", b.program, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	slog.DebugContext(ctx, "Allowed sandbox network access",
+		"sandbox", name, "hosts", hosts, "output", strings.TrimSpace(string(out)))
+	return nil
 }
 
 // command builds an exec.Cmd for the given sandbox sub-command and arguments.

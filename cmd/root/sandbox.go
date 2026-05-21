@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,6 +88,13 @@ func runInSandbox(ctx context.Context, cmd *cobra.Command, args []string, runCon
 	if err != nil {
 		return err
 	}
+
+	// Sandbox templates ship with a default-deny network policy that
+	// allows the major model providers (api.anthropic.com, api.openai.com,
+	// ...) but blocks every *.docker.com host. When the agent is
+	// configured to talk to the Docker AI Gateway, allowlist that
+	// hostname for this sandbox so the inner can actually reach it.
+	allowGatewayHost(ctx, backend, name, runConfig.ModelsGateway)
 
 	// Resolve env vars the agent needs and forward them into the sandbox.
 	// Docker Desktop proxies well-known API keys automatically; this handles
@@ -171,4 +179,51 @@ func dockerAgentArgs(cmd *cobra.Command, args []string, configDir string) []stri
 	dockerAgentArgs = append(dockerAgentArgs, "--config-dir", configDir)
 
 	return dockerAgentArgs
+}
+
+// allowGatewayHost extracts the host[:port] from gatewayURL and asks
+// the sandbox backend to add a per-sandbox allow-network rule for it.
+// The default sandbox proxy denies *.docker.com, so without this the
+// inner agent's first request to the gateway returns
+// "403 Blocked by network policy".
+//
+// Best-effort: a malformed URL or a backend that doesn't support
+// per-sandbox policies is logged at debug level and the run
+// proceeds. The user will then see a network-policy 403 from the
+// inner and we surface that diagnostic verbatim.
+func allowGatewayHost(ctx context.Context, backend *sandbox.Backend, name, gatewayURL string) {
+	if gatewayURL == "" {
+		return
+	}
+	host := gatewayHostPort(gatewayURL)
+	if host == "" {
+		slog.DebugContext(ctx, "Could not extract host from models-gateway URL; not allowlisting",
+			"gateway", gatewayURL)
+		return
+	}
+	if err := backend.AllowHosts(ctx, name, []string{host}); err != nil {
+		slog.WarnContext(ctx, "Failed to allowlist models-gateway host in sandbox; the inner agent may see HTTP 403",
+			"sandbox", name, "host", host, "error", err)
+	}
+}
+
+// gatewayHostPort returns the "host" or "host:port" portion of a
+// gateway URL, or "" if rawURL is malformed. We accept both fully
+// formed URLs (https://example.com:443/proxy) and bare authorities
+// (example.com:443) so users can configure the gateway either way.
+func gatewayHostPort(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+	u, err := url.Parse(rawURL)
+	if err == nil && u.Host != "" {
+		return u.Host
+	}
+	// Bare authority: take everything up to the first "/" or "?".
+	for i, r := range rawURL {
+		if r == '/' || r == '?' {
+			return rawURL[:i]
+		}
+	}
+	return rawURL
 }
