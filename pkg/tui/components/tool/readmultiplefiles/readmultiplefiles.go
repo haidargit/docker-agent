@@ -7,6 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	pathx "github.com/docker/docker-agent/pkg/path"
 	"github.com/docker/docker-agent/pkg/tools/builtin/filesystem"
 	"github.com/docker/docker-agent/pkg/tui/components/spinner"
 	"github.com/docker/docker-agent/pkg/tui/components/toolcommon"
@@ -94,7 +95,7 @@ func formatSummaryLines(meta *filesystem.ReadMultipleFilesMeta) []fileSummary {
 
 	var summaries []fileSummary
 	for _, file := range meta.Files {
-		path := toolcommon.ShortenPath(file.Path)
+		path := pathx.ShortenHome(file.Path)
 		var output string
 		if file.Error != "" {
 			output = " " + file.Error
@@ -120,7 +121,7 @@ func formatFilesList(filePaths []string) string {
 
 	shortened := make([]string, len(filePaths))
 	for i, p := range filePaths {
-		shortened[i] = toolcommon.ShortenPath(p)
+		shortened[i] = pathx.ShortenHome(p)
 	}
 
 	if len(shortened) == 1 {

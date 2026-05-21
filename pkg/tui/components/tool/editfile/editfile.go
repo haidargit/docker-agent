@@ -3,6 +3,7 @@ package editfile
 import (
 	"fmt"
 
+	pathx "github.com/docker/docker-agent/pkg/path"
 	"github.com/docker/docker-agent/pkg/tools/builtin/filesystem"
 	"github.com/docker/docker-agent/pkg/tui/components/spinner"
 	"github.com/docker/docker-agent/pkg/tui/components/toolcommon"
@@ -72,7 +73,7 @@ func render(
 			"%s%s %s",
 			toolcommon.Icon(msg, s),
 			styles.ToolName.Render(msg.ToolDefinition.DisplayName()),
-			styles.ToolMessageStyle.Render(toolcommon.ShortenPath(args.Path)),
+			styles.ToolMessageStyle.Render(pathx.ShortenHome(args.Path)),
 		)
 	}
 
@@ -142,7 +143,7 @@ func renderCollapsed(
 		"%s%s %s%s",
 		toolcommon.Icon(msg, s),
 		styles.ToolName.Render(msg.ToolDefinition.DisplayName()),
-		styles.ToolMessageStyle.Render(toolcommon.ShortenPath(args.Path)),
+		styles.ToolMessageStyle.Render(pathx.ShortenHome(args.Path)),
 		diffSummary,
 	)
 

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	pathx "github.com/docker/docker-agent/pkg/path"
 	"github.com/docker/docker-agent/pkg/paths"
 )
 
@@ -51,11 +52,7 @@ func localSearchPaths() []localSearchPath {
 	var searchPaths []localSearchPath
 
 	if home := paths.GetHomeDir(); home != "" {
-		searchPaths = append(searchPaths,
-			localSearchPath{filepath.Join(home, ".codex", "skills"), true},
-			localSearchPath{filepath.Join(home, ".claude", "skills"), false},
-			localSearchPath{filepath.Join(home, ".agents", "skills"), true},
-		)
+		searchPaths = append(searchPaths, homeSkillSearchPaths(home)...)
 	}
 
 	cwd, err := os.Getwd()
@@ -77,6 +74,30 @@ func loadLocalSkillsInto(skillMap map[string]Skill) {
 		for _, skill := range loadSkillsFromDir(p.dir, p.recursive) {
 			skillMap[skill.Name] = skill
 		}
+	}
+}
+
+// IsHomeSkillPath reports whether path is under one of the global skill
+// directories in the user's home directory.
+func IsHomeSkillPath(path string) bool {
+	home := paths.GetHomeDir()
+	if home == "" {
+		return false
+	}
+
+	for _, p := range homeSkillSearchPaths(home) {
+		if pathx.IsWithin(path, p.dir) {
+			return true
+		}
+	}
+	return false
+}
+
+func homeSkillSearchPaths(home string) []localSearchPath {
+	return []localSearchPath{
+		{filepath.Join(home, ".codex", "skills"), true},
+		{filepath.Join(home, ".claude", "skills"), false},
+		{filepath.Join(home, ".agents", "skills"), true},
 	}
 }
 

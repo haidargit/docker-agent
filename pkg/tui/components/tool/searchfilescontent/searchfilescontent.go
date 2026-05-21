@@ -3,6 +3,7 @@ package searchfilescontent
 import (
 	"fmt"
 
+	pathx "github.com/docker/docker-agent/pkg/path"
 	"github.com/docker/docker-agent/pkg/tools/builtin/filesystem"
 	"github.com/docker/docker-agent/pkg/tui/components/toolcommon"
 	"github.com/docker/docker-agent/pkg/tui/core/layout"
@@ -23,7 +24,7 @@ func extractArgs(args string) string {
 		return ""
 	}
 
-	path := toolcommon.ShortenPath(parsed.Path)
+	path := pathx.ShortenHome(parsed.Path)
 	query := parsed.Query
 	if len(query) > 30 {
 		query = query[:27] + "..."

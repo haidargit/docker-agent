@@ -45,6 +45,7 @@ import (
 	"github.com/docker/docker-agent/pkg/config"
 	latestcfg "github.com/docker/docker-agent/pkg/config/latest"
 	"github.com/docker/docker-agent/pkg/environment"
+	pathx "github.com/docker/docker-agent/pkg/path"
 	"github.com/docker/docker-agent/pkg/paths"
 	"github.com/docker/docker-agent/pkg/promptfiles"
 	"github.com/docker/docker-agent/pkg/skills"
@@ -715,7 +716,7 @@ func (r *Result) PrintSummary(w io.Writer) {
 		fmt.Fprintln(w, "  prompt files:")
 		for _, e := range promptEntries {
 			name := promptFileName(e)
-			notes := []string{"from " + displayHostPath(e.Source)}
+			notes := []string{"from " + pathx.ShortenHome(e.Source)}
 			if !e.IsStaged() {
 				notes = append(notes, "workspace mount")
 			} else if redacted[e.Target] {
@@ -781,24 +782,7 @@ func displaySkillHeader(e Entry) string {
 	if e.Source == "" {
 		return name
 	}
-	return fmt.Sprintf("%s (from %s)", name, displayHostPath(e.Source))
-}
-
-// displayHostPath replaces the user's $HOME prefix with "~" so the
-// printed paths stay short and don't reveal the local username when
-// shared in screenshots.
-func displayHostPath(p string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return p
-	}
-	if strings.HasPrefix(p, home+string(filepath.Separator)) {
-		return "~" + p[len(home):]
-	}
-	if p == home {
-		return "~"
-	}
-	return p
+	return fmt.Sprintf("%s (from %s)", name, pathx.ShortenHome(e.Source))
 }
 
 // summaryCounts formats the trailing line of PrintSummary.

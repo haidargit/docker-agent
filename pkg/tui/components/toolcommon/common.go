@@ -9,7 +9,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/docker/docker-agent/pkg/paths"
 	"github.com/docker/docker-agent/pkg/tools"
 	"github.com/docker/docker-agent/pkg/tui/components/spinner"
 	"github.com/docker/docker-agent/pkg/tui/styles"
@@ -251,18 +250,6 @@ func RenderTool(msg *types.Message, inProgress spinner.Spinner, args, result str
 	}
 
 	return styles.RenderComposite(styles.ToolMessageStyle.Width(width), content)
-}
-
-// ShortenPath replaces home directory with ~ for cleaner display.
-func ShortenPath(path string) string {
-	if path == "" {
-		return path
-	}
-	homeDir := paths.GetHomeDir()
-	if homeDir != "" && strings.HasPrefix(path, homeDir) {
-		return "~" + strings.TrimPrefix(path, homeDir)
-	}
-	return path
 }
 
 // RenderFriendlyHeader renders a friendly description header if present in the tool call arguments.

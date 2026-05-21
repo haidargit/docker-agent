@@ -754,6 +754,18 @@ func TestLoad_KitDirOverridesEverything(t *testing.T) {
 	assert.NotContains(t, names, "host-only", "host paths must be ignored when a kit is set")
 }
 
+func TestIsHomeSkillPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	assert.True(t, IsHomeSkillPath(filepath.Join(home, ".codex", "skills", "skill-a")))
+	assert.True(t, IsHomeSkillPath(filepath.Join(home, ".claude", "skills", "skill-b")))
+	assert.True(t, IsHomeSkillPath(filepath.Join(home, ".agents", "skills", "skill-c")))
+	assert.False(t, IsHomeSkillPath(filepath.Join(home, "work", "repo", ".agents", "skills", "project-skill")))
+	assert.False(t, IsHomeSkillPath(filepath.Join(filepath.Dir(home), "elsewhere", "skill")))
+}
+
 func TestSkill_IsFork(t *testing.T) {
 	assert.True(t, (&Skill{Context: "fork"}).IsFork())
 	assert.False(t, (&Skill{Context: ""}).IsFork())

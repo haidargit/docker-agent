@@ -2,10 +2,12 @@ package dialog
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 
+	pathx "github.com/docker/docker-agent/pkg/path"
 	"github.com/docker/docker-agent/pkg/skills"
 	"github.com/docker/docker-agent/pkg/tui/components/toolcommon"
 	"github.com/docker/docker-agent/pkg/tui/styles"
@@ -66,8 +68,38 @@ func formatSkill(s *skills.Skill, contentWidth int) []string {
 			out = append(out, indent+styles.MutedStyle.Render(toolcommon.TruncateText(desc, availableWidth)))
 		}
 	}
+
+	if path := skillLoadedFrom(s); path != "" {
+		indent := "    "
+		prefix := "from: "
+		availableWidth := contentWidth - lipgloss.Width(indent) - lipgloss.Width(prefix)
+		if availableWidth > 0 {
+			out = append(out, indent+styles.MutedStyle.Render(prefix+toolcommon.TruncateText(path, availableWidth)))
+		}
+	}
+
 	out = append(out, "")
 	return out
+}
+
+func skillLoadedFrom(s *skills.Skill) string {
+	path := s.BaseDir
+	if path == "" {
+		path = s.FilePath
+	}
+	if path == "" {
+		return ""
+	}
+
+	if s.Local {
+		if skills.IsHomeSkillPath(path) {
+			return pathx.ShortenHome(path)
+		}
+		cwd, _ := os.Getwd()
+		return pathx.RelativeTo(path, cwd)
+	}
+
+	return pathx.ShortenHome(path)
 }
 
 func skillSourceBadge(s *skills.Skill) string {

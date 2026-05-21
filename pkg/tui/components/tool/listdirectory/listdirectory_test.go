@@ -5,7 +5,6 @@ import (
 
 	"github.com/docker/docker-agent/pkg/tools"
 	"github.com/docker/docker-agent/pkg/tools/builtin/filesystem"
-	"github.com/docker/docker-agent/pkg/tui/components/toolcommon"
 	"github.com/docker/docker-agent/pkg/tui/types"
 )
 
@@ -66,44 +65,6 @@ func TestExtractResult(t *testing.T) {
 			result := extractResult(msg)
 			if result != tt.expected {
 				t.Errorf("extractResult() = %q, want %q", result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestShortenPath(t *testing.T) {
-	tests := []struct {
-		name     string
-		path     string
-		expected string
-	}{
-		{
-			name:     "empty path",
-			path:     "",
-			expected: "",
-		},
-		{
-			name:     "current directory",
-			path:     ".",
-			expected: ".",
-		},
-		{
-			name:     "absolute path",
-			path:     "/usr/local/bin",
-			expected: "/usr/local/bin",
-		},
-		{
-			name:     "relative path",
-			path:     "src/components",
-			expected: "src/components",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := toolcommon.ShortenPath(tt.path)
-			if result != tt.expected {
-				t.Errorf("ShortenPath(%q) = %q, want %q", tt.path, result, tt.expected)
 			}
 		})
 	}
