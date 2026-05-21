@@ -157,15 +157,74 @@ models:
 	})
 	require.NoError(t, err)
 
-	// Only the $HOME AGENTS.md is staged (the workspace one is reachable
-	// live inside the sandbox).
-	require.Len(t, res.Manifest.PromptFiles, 1)
-	assert.Equal(t, homeAgents, res.Manifest.PromptFiles[0].Source)
+	// Both candidates are recorded: the workspace one is reachable via
+	// the live mount (Target empty) and the $HOME one is staged into
+	// the kit. This mirrors the runtime promptfiles.Paths semantics
+	// which would also return both inside the sandbox.
+	require.Len(t, res.Manifest.PromptFiles, 2)
 
-	staged := filepath.Join(res.HostDir, promptfiles.KitSubdir, "AGENTS.md")
-	data, err := os.ReadFile(staged)
+	var staged, mounted Entry
+	for _, e := range res.Manifest.PromptFiles {
+		if e.IsStaged() {
+			staged = e
+		} else {
+			mounted = e
+		}
+	}
+	assert.Equal(t, homeAgents, staged.Source, "the $HOME copy must be the staged one")
+	assert.Equal(t, workspaceAgents, mounted.Source, "the workspace copy must be recorded as workspace-mounted")
+
+	stagedPath := filepath.Join(res.HostDir, promptfiles.KitSubdir, "AGENTS.md")
+	data, err := os.ReadFile(stagedPath)
 	require.NoError(t, err)
 	assert.Equal(t, "# host AGENTS.md\n", string(data))
+}
+
+func TestBuild_PromptFileInWorkspaceIsRecordedButNotStaged(t *testing.T) {
+	isolateEnv(t)
+	hostHome := t.TempDir()
+	workspace := t.TempDir()
+
+	workspaceAgents := filepath.Join(workspace, "AGENTS.md")
+	require.NoError(t, os.WriteFile(workspaceAgents, []byte("# workspace AGENTS.md\n"), 0o600))
+
+	agentYAML := []byte(`agents:
+  root:
+    model: openai/gpt-5
+    description: tester
+    instruction: hello
+    add_prompt_files: ["AGENTS.md"]
+models:
+  openai/gpt-5:
+    provider: openai
+    model: gpt-5
+`)
+	yamlPath := filepath.Join(workspace, "agent.yaml")
+	require.NoError(t, os.WriteFile(yamlPath, agentYAML, 0o600))
+
+	t.Setenv("HOME", hostHome)
+	t.Chdir(workspace)
+
+	res, err := Build(t.Context(), Options{
+		AgentRef:  yamlPath,
+		HostHome:  hostHome,
+		HostCwd:   workspace,
+		Workspace: workspace,
+		CacheDir:  t.TempDir(),
+	})
+	require.NoError(t, err)
+
+	// The user's case: AGENTS.md exists only inside the workspace.
+	// We must record it (so the printed kit summary lists it) but we
+	// must not copy it into the kit — the live workspace mount makes
+	// it visible to the agent already.
+	require.Len(t, res.Manifest.PromptFiles, 1)
+	entry := res.Manifest.PromptFiles[0]
+	assert.Equal(t, workspaceAgents, entry.Source)
+	assert.False(t, entry.IsStaged(), "workspace files must not be staged into the kit")
+
+	assert.NoFileExists(t, filepath.Join(res.HostDir, promptfiles.KitSubdir, "AGENTS.md"),
+		"workspace prompt file must not have a redacted copy in the kit")
 }
 
 func TestBuild_NoAgentRefLeavesPromptFilesEmpty(t *testing.T) {
@@ -506,6 +565,53 @@ models:
 
 	// And no host secret leaks into the printed output.
 	assert.NotContains(t, out, fakeGitHubToken)
+}
+
+func TestPrintSummary_WorkspacePromptFile(t *testing.T) {
+	isolateEnv(t)
+	hostHome := t.TempDir()
+	workspace := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, "AGENTS.md"),
+		[]byte("# project AGENTS.md\n"), 0o600))
+
+	agentYAML := []byte(`agents:
+  root:
+    model: openai/gpt-5
+    description: tester
+    instruction: hello
+    add_prompt_files: ["AGENTS.md"]
+models:
+  openai/gpt-5:
+    provider: openai
+    model: gpt-5
+`)
+	yamlPath := filepath.Join(workspace, "agent.yaml")
+	require.NoError(t, os.WriteFile(yamlPath, agentYAML, 0o600))
+
+	t.Setenv("HOME", hostHome)
+	t.Chdir(workspace)
+
+	res, err := Build(t.Context(), Options{
+		AgentRef:  yamlPath,
+		HostHome:  hostHome,
+		HostCwd:   workspace,
+		Workspace: workspace,
+		CacheDir:  t.TempDir(),
+	})
+	require.NoError(t, err)
+
+	var buf strings.Builder
+	res.PrintSummary(&buf)
+	out := buf.String()
+
+	// The user must see that AGENTS.md is part of the agent's input,
+	// even when the host did not need to stage it (the workspace mount
+	// surfaces it directly inside the sandbox).
+	assert.Contains(t, out, "prompt files:")
+	assert.Contains(t, out, "AGENTS.md (from "+filepath.Join(workspace, "AGENTS.md")+", workspace mount)")
+	assert.NotContains(t, out, "redacted",
+		"workspace prompt files are not redacted because they aren't copied into the kit")
 }
 
 func TestPrintSummary_Empty(t *testing.T) {

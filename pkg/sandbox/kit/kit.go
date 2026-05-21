@@ -117,8 +117,18 @@ type Entry struct {
 	// Source is the original host path. Omitted from the on-disk
 	// manifest so the sandbox cannot learn the host layout.
 	Source string `json:"-"`
-	// Target is the path relative to the kit root.
-	Target string `json:"target"`
+	// Target is the path relative to the kit root. Empty when the
+	// file isn't staged into the kit because it's already reachable
+	// inside the sandbox via the live workspace mount.
+	Target string `json:"target,omitempty"`
+}
+
+// IsStaged reports whether the entry has a copy under the kit root.
+// A non-staged entry is one the agent reaches via the live workspace
+// mount instead, surfaced in the manifest and the printed summary so
+// the user can see what the agent will read.
+func (e Entry) IsStaged() bool {
+	return e.Target != ""
 }
 
 // Redaction records that portcullis added at least one [portcullis.Marker]
@@ -337,11 +347,21 @@ func stageSkills(kitDir string) ([]Entry, []Redaction, error) {
 	return entries, redactions, nil
 }
 
-// stagePromptFiles walks every agent in cfg and copies each
-// add_prompt_files entry that lives outside the live workspace into
-// <kit>/prompt_files/<name>. Files under workspace are skipped because
-// the sandbox already mounts that directory live; shipping a redacted
-// duplicate would only confuse the in-sandbox cwd-walk lookup.
+// stagePromptFiles walks every agent in cfg, records every
+// add_prompt_files entry the agent will read, and stages the ones
+// that aren't already reachable inside the sandbox via the live
+// workspace mount.
+//
+// Files under workspace are NOT copied (the live mount surfaces them
+// directly), but they are still recorded in the returned [Entry]
+// slice with Target == "" so the printed kit summary reflects every
+// file the agent will see — not just the ones the host had to ship.
+//
+// When a single name (e.g. "AGENTS.md") resolves to both a workspace
+// match and a host-home match we record both: the workspace one
+// surfaces through the live mount and the host-home one is staged
+// into the kit, exactly mirroring the runtime [promptfiles.Paths]
+// behaviour that returns up to two paths.
 func stagePromptFiles(kitDir string, cfg *latestcfg.Config, hostCwd, hostHome, workspace string) ([]Entry, []Redaction, error) {
 	target := filepath.Join(kitDir, promptfiles.KitSubdir)
 	if err := os.MkdirAll(target, 0o750); err != nil {
@@ -352,6 +372,7 @@ func stagePromptFiles(kitDir string, cfg *latestcfg.Config, hostCwd, hostHome, w
 		entries    []Entry
 		redactions []Redaction
 		seen       = make(map[string]bool)
+		stagedKey  = make(map[string]bool) // dedupe by kit-relative target
 	)
 	for _, agent := range cfg.Agents {
 		for _, name := range agent.AddPromptFiles {
@@ -362,10 +383,22 @@ func stagePromptFiles(kitDir string, cfg *latestcfg.Config, hostCwd, hostHome, w
 
 			for _, src := range promptfiles.Paths(hostCwd, hostHome, "", name) {
 				if isUnder(src, workspace) {
-					// The live mount will surface it inside the sandbox.
+					// The live mount will surface it inside the sandbox —
+					// no copy needed, but record the entry so the user can
+					// see in the kit summary that AGENTS.md (etc.) is
+					// covered.
+					entries = append(entries, Entry{Source: src, Target: ""})
 					continue
 				}
+
 				rel := filepath.Join(promptfiles.KitSubdir, name)
+				if stagedKey[rel] {
+					// Two non-workspace matches for the same name (e.g.
+					// the rare case of nested $HOMEs in tests). Keep the
+					// first — [promptfiles.Paths] orders them with the
+					// closest match first.
+					continue
+				}
 				dst := filepath.Join(kitDir, rel)
 				red, err := copyFile(kitDir, src, dst)
 				if err != nil {
@@ -375,12 +408,7 @@ func stagePromptFiles(kitDir string, cfg *latestcfg.Config, hostCwd, hostHome, w
 				if red != nil {
 					redactions = append(redactions, *red)
 				}
-				// Only one copy per name. promptfiles.Paths returns the
-				// closest workdir match first followed by the home/kit
-				// fallback; we ship whichever survives the workspace
-				// filter and stop, since later candidates would just
-				// overwrite this one.
-				break
+				stagedKey[rel] = true
 			}
 		}
 	}
@@ -646,15 +674,28 @@ func (r *Result) PrintSummary(w io.Writer) {
 	if len(promptEntries) > 0 {
 		fmt.Fprintln(w, "  prompt files:")
 		for _, e := range promptEntries {
-			mark := ""
-			if redacted[e.Target] {
-				mark = ", redacted"
+			name := promptFileName(e)
+			notes := []string{"from " + displayHostPath(e.Source)}
+			if !e.IsStaged() {
+				notes = append(notes, "workspace mount")
+			} else if redacted[e.Target] {
+				notes = append(notes, "redacted")
 			}
-			fmt.Fprintf(w, "    %s (from %s%s)\n", filepath.Base(e.Target), displayHostPath(e.Source), mark)
+			fmt.Fprintf(w, "    %s (%s)\n", name, strings.Join(notes, ", "))
 		}
 	}
 
 	fmt.Fprintf(w, "  summary: %s\n", summaryCounts(len(skillFiles), len(promptEntries), len(r.Manifest.Redactions)))
+}
+
+// promptFileName returns the user-visible name for a prompt-file
+// entry: the kit-relative basename for staged entries, or the host
+// basename for entries reachable via the live workspace mount.
+func promptFileName(e Entry) string {
+	if e.IsStaged() {
+		return filepath.Base(e.Target)
+	}
+	return filepath.Base(e.Source)
 }
 
 // skillGroup pairs a skill manifest entry with the kit-relative paths
