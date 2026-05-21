@@ -76,6 +76,10 @@ func (m *mockRuntime) SessionStore() session.Store                              
 func (m *mockRuntime) Summarize(context.Context, *session.Session, string, runtime.EventSink) {}
 func (m *mockRuntime) PermissionsInfo() *runtime.PermissionsInfo                              { return nil }
 func (m *mockRuntime) CurrentAgentSkillsToolset() *skillstool.ToolSet                         { return nil }
+func (m *mockRuntime) RunSkillFork(context.Context, *session.Session, skillstool.RunSkillArgs, runtime.EventSink) (*tools.ToolCallResult, error) {
+	return nil, nil
+}
+
 func (m *mockRuntime) CurrentMCPPrompts(context.Context) map[string]mcptools.PromptInfo {
 	return nil
 }

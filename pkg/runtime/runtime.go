@@ -85,6 +85,13 @@ type Runtime interface {
 	// CurrentAgentSkillsToolset returns the skills toolset for the current agent, or nil if skills are not enabled.
 	CurrentAgentSkillsToolset() *skills.ToolSet
 
+	// RunSkillFork executes a `context: fork` skill as an isolated
+	// sub-session of sess. Used by the run_skill tool and the App's
+	// slash-command path. Returns a ToolCallResult carrying the sub-agent's
+	// last assistant message, or a user-facing error reason; err is non-nil
+	// only for unexpected runtime failures.
+	RunSkillFork(ctx context.Context, sess *session.Session, args skills.RunSkillArgs, events EventSink) (*tools.ToolCallResult, error)
+
 	// CurrentMCPPrompts returns MCP prompts available from the current agent's toolsets.
 	// Returns an empty map if no MCP prompts are available.
 	CurrentMCPPrompts(ctx context.Context) map[string]mcptools.PromptInfo

@@ -28,6 +28,7 @@ import (
 	"github.com/docker/docker-agent/pkg/shellpath"
 	"github.com/docker/docker-agent/pkg/skills"
 	"github.com/docker/docker-agent/pkg/tools"
+	skillstool "github.com/docker/docker-agent/pkg/tools/builtin/skills"
 	mcptools "github.com/docker/docker-agent/pkg/tools/mcp"
 	"github.com/docker/docker-agent/pkg/tui/messages"
 )
@@ -227,6 +228,9 @@ func (a *App) CurrentAgentSkills() []skills.Skill {
 
 // ResolveSkillCommand checks if the input matches a skill slash command (e.g. /skill-name args).
 // If matched, it reads the skill content and returns the resolved prompt. Otherwise returns "".
+//
+// Fork-mode skills are NOT resolved here; chat dispatches them via
+// SkillCommandFork + RunSkillFork to keep the parent transcript clean.
 func (a *App) ResolveSkillCommand(ctx context.Context, input string) (string, error) {
 	if !strings.HasPrefix(input, "/") {
 		return "", nil
@@ -245,6 +249,13 @@ func (a *App) ResolveSkillCommand(ctx context.Context, input string) (string, er
 			continue
 		}
 
+		if skill.IsFork() {
+			// Fall through to ResolveCommand for non-chat callers; the
+			// chat layer already routed fork-mode skills via
+			// SkillCommandFork before reaching this point.
+			return "", nil
+		}
+
 		content, err := st.ReadSkillContent(ctx, skill.Name)
 		if err != nil {
 			return "", fmt.Errorf("reading skill %q: %w", skill.Name, err)
@@ -258,6 +269,81 @@ func (a *App) ResolveSkillCommand(ctx context.Context, input string) (string, er
 
 	return "", nil
 }
+
+// SkillCommandFork returns (skillName, task, true) when input is a slash
+// command for a `context: fork` skill, otherwise (_, _, false). Chat layers
+// must call this before ResolveInput and route to RunSkillFork on a hit.
+func (a *App) SkillCommandFork(_ context.Context, input string) (skillName, task string, ok bool) {
+	if !strings.HasPrefix(input, "/") {
+		return "", "", false
+	}
+
+	st := a.runtime.CurrentAgentSkillsToolset()
+	if st == nil {
+		return "", "", false
+	}
+
+	cmd, arg, _ := strings.Cut(input[1:], " ")
+	arg = strings.TrimSpace(arg)
+
+	for _, skill := range st.Skills() {
+		if skill.Name != cmd {
+			continue
+		}
+		if !skill.IsFork() {
+			return "", "", false
+		}
+		return skill.Name, arg, true
+	}
+
+	return "", "", false
+}
+
+// RunSkillFork dispatches a fork-mode skill in an isolated sub-session of
+// the current parent. The parent gains a SubSession item once the runtime
+// opens the child; the sub-session's first user message is the expanded
+// SKILL.md body. Companion of SkillCommandFork.
+func (a *App) RunSkillFork(ctx context.Context, cancel context.CancelFunc, skillName, task string, _ []messages.Attachment) {
+	a.cancel = cancel
+
+	// Mirrors App.Run's drain loop: forward events to the App bus and
+	// always let StreamStoppedEvent through, even after ctx cancellation,
+	// so the supervisor marks the session idle.
+	go func() { //nolint:gosec // background processing intentionally continues after request ctx ends; uses context.Background() only to forward StreamStoppedEvent
+		events := make(chan runtime.Event, defaultRuntimeEventBuffer)
+		go func() {
+			defer close(events)
+			result, err := a.runtime.RunSkillFork(ctx, a.session, skillstool.RunSkillArgs{
+				Name: skillName,
+				Task: task,
+			}, runtime.NewChannelSink(events))
+			switch {
+			case errors.Is(err, runtime.ErrUnsupported):
+				slog.WarnContext(ctx, "Runtime does not support fork-mode skills; skill not executed", "skill", skillName)
+				a.sendEvent(ctx, runtime.Error(fmt.Sprintf("Skill %q cannot run: this runtime does not support fork-mode skills.", skillName)))
+			case err != nil:
+				slog.ErrorContext(ctx, "Failed to run fork-mode skill", "skill", skillName, "error", err)
+				a.sendEvent(ctx, runtime.Error(fmt.Sprintf("Skill %q failed: %v", skillName, err)))
+			case result != nil && result.IsError:
+				a.sendEvent(ctx, runtime.Error(result.Output))
+			}
+		}()
+
+		for event := range events {
+			if ctx.Err() != nil {
+				if _, ok := event.(*runtime.StreamStoppedEvent); ok {
+					a.sendEvent(context.Background(), event)
+				}
+				continue
+			}
+			a.sendEvent(ctx, event)
+		}
+	}()
+}
+
+// defaultRuntimeEventBuffer matches Summarize and Runtime.RunStream;
+// wide enough that a fork-skill sub-session won't block the producer.
+const defaultRuntimeEventBuffer = 100
 
 // ResolveInput resolves the user input by trying skill commands first,
 // then agent commands. Returns the resolved content ready to send to the agent.

@@ -860,6 +860,11 @@ func (p *chatPage) processMessage(msg msgtypes.SendMsg) tea.Cmd {
 	// Run command resolution and agent execution in a goroutine
 	// so the UI stays responsive while skill/agent commands are resolved.
 	go func() {
+		if skillName, task, ok := p.app.SkillCommandFork(ctx, msg.Content); ok {
+			// Fork-mode skill: run in an isolated sub-session.
+			p.app.RunSkillFork(ctx, p.msgCancel, skillName, task, msg.Attachments)
+			return
+		}
 		p.app.Run(ctx, p.msgCancel, p.app.ResolveInput(ctx, msg.Content), msg.Attachments)
 	}()
 

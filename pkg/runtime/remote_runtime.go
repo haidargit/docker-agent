@@ -571,6 +571,12 @@ func (r *RemoteRuntime) CurrentAgentSkillsToolset() *skills.ToolSet {
 	return nil
 }
 
+// RunSkillFork is unsupported on remote runtimes; the server owns skill
+// execution.
+func (r *RemoteRuntime) RunSkillFork(context.Context, *session.Session, skills.RunSkillArgs, EventSink) (*tools.ToolCallResult, error) {
+	return nil, fmt.Errorf("run skill fork: %w", ErrUnsupported)
+}
+
 // UpdateSessionTitle updates the title of the current session on the remote server.
 func (r *RemoteRuntime) UpdateSessionTitle(ctx context.Context, sess *session.Session, title string) error {
 	sess.Title = title

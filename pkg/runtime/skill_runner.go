@@ -14,26 +14,21 @@ import (
 	"github.com/docker/docker-agent/pkg/tools/builtin/skills"
 )
 
-// handleRunSkill executes a skill as an isolated sub-agent. The skill's
-// SKILL.md content (with command expansions) becomes the system prompt, and
-// the caller-provided task becomes the implicit user message. The sub-agent
-// runs in a child session using the current agent's model and tools, and
-// its final response is returned as the tool result.
-//
-// All skill-specific business rules (lookup, fork-mode validation, content
-// expansion) live in (*skills.ToolSet).PrepareForkSubSession; this
-// handler keeps only the runtime-private orchestration that runForwarding
-// can't generalise — namely the optional model override that applies for
-// the sub-session's lifetime.
-//
-// This implements the `context: fork` behaviour from the SKILL.md frontmatter,
-// following the same convention as Claude Code.
+// handleRunSkill unmarshals the run_skill tool arguments and delegates
+// to RunSkillFork.
 func (r *LocalRuntime) handleRunSkill(ctx context.Context, sess *session.Session, toolCall tools.ToolCall, evts EventSink) (*tools.ToolCallResult, error) {
 	var args skills.RunSkillArgs
 	if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %w", err)
 	}
+	return r.RunSkillFork(ctx, sess, args, evts)
+}
 
+// RunSkillFork executes a `context: fork` skill as an isolated sub-session.
+// The expanded SKILL.md body becomes the child's first user message; the
+// agent's own system prompt is preserved. Shared by the run_skill tool
+// and the App's slash-command path.
+func (r *LocalRuntime) RunSkillFork(ctx context.Context, sess *session.Session, args skills.RunSkillArgs, evts EventSink) (*tools.ToolCallResult, error) {
 	st := r.CurrentAgentSkillsToolset()
 	if st == nil {
 		return tools.ResultError("no skills are available for the current agent"), nil
@@ -46,9 +41,8 @@ func (r *LocalRuntime) handleRunSkill(ctx context.Context, sess *session.Session
 
 	ca := r.CurrentAgentName()
 
-	// Open the span before any pre-delegation work so model resolution
-	// (inside WithAgentModel) is recorded under runtime.run_skill rather
-	// than the parent session span.
+	// Open the span before model resolution so it's recorded under
+	// runtime.run_skill rather than the parent session span.
 	ctx, span := r.startSpan(ctx, "runtime.run_skill", trace.WithAttributes(
 		attribute.String("agent", ca),
 		attribute.String("skill", prepared.SkillName),
@@ -62,11 +56,9 @@ func (r *LocalRuntime) handleRunSkill(ctx context.Context, sess *session.Session
 		"task", prepared.Task,
 	)
 
-	// If the skill declares a model override, apply it for the duration of
-	// the sub-session. WithAgentModel handles every accepted form (named
-	// model, alloy, inline provider/model, inline alloy) and returns a
-	// CAS-safe restore func that is always non-nil; on failure we log a
-	// warning and fall back to the agent's currently-active model.
+	// Apply the skill's optional model override for the sub-session.
+	// On failure we log and fall back to the agent's current model;
+	// restore is CAS-safe and always non-nil.
 	if prepared.Model != "" {
 		restore, err := r.WithAgentModel(ctx, ca, prepared.Model)
 		defer restore()
@@ -80,14 +72,13 @@ func (r *LocalRuntime) handleRunSkill(ctx context.Context, sess *session.Session
 		}
 	}
 
-	// run_skill keeps the same agent (skills are sub-sessions of the
-	// caller, not delegations to another agent), so we never swap the
-	// runtime's currentAgent here.
+	// Skills are sub-sessions of the caller, not delegations, so the
+	// runtime's currentAgent stays put.
 	return r.runForwarding(ctx, sess, evts, delegationRequest{
 		SubSessionConfig: SubSessionConfig{
 			Task:                prepared.Task,
-			SystemMessage:       prepared.Content,
-			ImplicitUserMessage: prepared.Task,
+			SystemMessage:       skills.BuildSkillSystemMessage(prepared, sess.AttachedFilesSnapshot()),
+			ImplicitUserMessage: skills.BuildSkillUserMessage(prepared),
 			AgentName:           ca,
 			Title:               "Skill: " + prepared.SkillName,
 			ToolsApproved:       sess.ToolsApproved,

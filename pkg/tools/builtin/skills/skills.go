@@ -22,6 +22,54 @@ var (
 	_ tools.Instructable = (*ToolSet)(nil)
 )
 
+// BuildSkillUserMessage formats a PreparedSkillFork as the implicit user
+// message of a forked sub-session. It mirrors the inline `<skill name=...>`
+// envelope used by ResolveSkillCommand for non-fork skills, strips the YAML
+// frontmatter (already consumed by the runtime), and surfaces a non-empty
+// Task as a "User's request:" header.
+func BuildSkillUserMessage(prepared *PreparedSkillFork) string {
+	body := stripFrontmatter(prepared.Content)
+	if prepared.Task != "" {
+		return fmt.Sprintf("Use the following skill.\n\nUser's request: %s\n\n<skill name=%q>\n%s\n</skill>", prepared.Task, prepared.SkillName, body)
+	}
+	return fmt.Sprintf("Use the following skill.\n\n<skill name=%q>\n%s\n</skill>", prepared.SkillName, body)
+}
+
+// BuildSkillSystemMessage returns the system prompt of a forked skill
+// sub-session. It avoids the task-delegation boilerplate from
+// buildTaskSystemMessage (which references <task> / "team of agents")
+// since skills aren't delegations. attachedFiles, when non-empty, exposes
+// parent-attached files by absolute path.
+func BuildSkillSystemMessage(prepared *PreparedSkillFork, attachedFiles []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are running the %q skill in an isolated sub-session. ", prepared.SkillName)
+	b.WriteString("The next user message contains the full skill instructions. Follow them; ")
+	b.WriteString("do not improvise around them or mix in unrelated tasks from prior conversations.")
+	if len(attachedFiles) > 0 {
+		b.WriteString("\n\nThe user attached these files in the parent conversation. Prefer them over any bare filenames in the skill body:\n<attached_files>")
+		for _, p := range attachedFiles {
+			fmt.Fprintf(&b, "\n- %s", p)
+		}
+		b.WriteString("\n</attached_files>")
+	}
+	return b.String()
+}
+
+// stripFrontmatter removes a leading YAML `---`-delimited frontmatter
+// block from a SKILL.md payload. Returns the input unchanged if no
+// leading fence or no closing fence is found.
+func stripFrontmatter(content string) string {
+	if !strings.HasPrefix(content, "---") {
+		return content
+	}
+	rest := content[3:]
+	_, after, found := strings.Cut(rest, "\n---")
+	if !found {
+		return content
+	}
+	return strings.TrimPrefix(after, "\n")
+}
+
 // ToolSet provides the read_skill and read_skill_file tools that let an
 // agent load skill content and supporting resources by name. It hides whether
 // a skill is local or remote — the agent just sees a name and description.
@@ -244,8 +292,8 @@ type PreparedSkillFork struct {
 	// Task is the caller-supplied task description, intended to be used as
 	// the implicit user message of the child session.
 	Task string
-	// Content is the expanded SKILL.md content, intended to be used as the
-	// system message of the child session.
+	// Content is the expanded SKILL.md content. Wrap with
+	// BuildSkillUserMessage to use as the child's first user message.
 	Content string
 	// Model is the optional model override declared in the SKILL.md
 	// frontmatter. Empty means "use the parent agent's current model".

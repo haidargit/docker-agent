@@ -64,6 +64,10 @@ func (m *mockRuntime) CurrentAgentSkillsToolset() *skillstool.ToolSet {
 	return nil
 }
 
+func (m *mockRuntime) RunSkillFork(context.Context, *session.Session, skillstool.RunSkillArgs, runtime.EventSink) (*tools.ToolCallResult, error) {
+	return nil, nil
+}
+
 func (m *mockRuntime) CurrentMCPPrompts(context.Context) map[string]mcptools.PromptInfo {
 	return make(map[string]mcptools.PromptInfo)
 }
