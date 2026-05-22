@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -171,9 +172,16 @@ func (t *Toolset) Start(ctx context.Context) error {
 	}
 
 	httpClient := httpclient.NewSafeClient(t.timeout, t.allowPrivateIPs)
-	httpClient.Transport = upstream.NewHeaderTransport(httpClient.Transport, t.headers)
+	base := httpClient.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	httpClient.Transport = upstream.NewHeaderTransport(base, t.headers)
 
-	client, err := a2aclient.NewFromCard(ctx, card, a2aclient.WithJSONRPCTransport(httpClient))
+	client, err := a2aclient.NewFromCard(ctx, card,
+		a2aclient.WithDefaultsDisabled(),
+		a2aclient.WithJSONRPCTransport(httpClient),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to create A2A client: %w", err)
 	}

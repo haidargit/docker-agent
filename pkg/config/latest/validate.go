@@ -145,8 +145,8 @@ func (t *Toolset) validate() error {
 	if len(t.BlockedDomains) > 0 && t.Type != "fetch" {
 		return errors.New("blocked_domains can only be used with type 'fetch'")
 	}
-	if t.AllowPrivateIPsEnabled() && t.Type != "fetch" && t.Type != "mcp" && t.Type != "api" && t.Type != "openapi" {
-		return errors.New("allow_private_ips can only be used with type 'fetch', 'api', 'openapi' or remote MCP toolsets")
+	if t.AllowPrivateIPsEnabled() && t.Type != "fetch" && t.Type != "mcp" && t.Type != "api" && t.Type != "openapi" && t.Type != "a2a" {
+		return errors.New("allow_private_ips can only be used with type 'fetch', 'api', 'openapi', 'a2a' or remote MCP toolsets")
 	}
 	if len(t.AllowedDomains) > 0 && len(t.BlockedDomains) > 0 {
 		return errors.New("allowed_domains and blocked_domains are mutually exclusive")
@@ -235,7 +235,7 @@ func (t *Toolset) validate() error {
 			return errors.New("either command, remote or ref must be set, but only one of those")
 		}
 		if t.AllowPrivateIPsEnabled() && t.Remote.URL == "" && t.Ref == "" {
-			return errors.New("allow_private_ips can only be used with type 'fetch', 'api', 'openapi' or remote MCP toolsets")
+			return errors.New("allow_private_ips can only be used with type 'fetch', 'api', 'openapi', 'a2a' or remote MCP toolsets")
 		}
 		if t.Remote.OAuth != nil {
 			if t.Remote.URL == "" {
