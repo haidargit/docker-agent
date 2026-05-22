@@ -102,8 +102,6 @@
       url: /features/chat-server/
     - title: Evaluation
       url: /features/evaluation/
-    - title: RAG
-      url: /features/rag/
     - title: Skills
       url: /features/skills/
     - title: Remote MCP Servers
