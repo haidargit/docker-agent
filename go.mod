@@ -30,7 +30,7 @@ require (
 	github.com/coder/acp-go-sdk v0.13.0
 	github.com/docker/cli v29.5.2+incompatible
 	github.com/docker/go-units v0.5.0
-	github.com/docker/portcullis v0.0.0-20260511153206-f65240c74787
+	github.com/docker/portcullis v0.0.0-20260522094836-b66c4ab750fd
 	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c
 	github.com/fatih/color v1.19.0
 	github.com/fsnotify/fsnotify v1.10.1
