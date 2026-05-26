@@ -160,11 +160,6 @@ type Toolset struct {
 
 	supervisor *lifecycle.Supervisor
 
-	// mediaDir is the toolset-scoped temp dir holding spooled media
-	// payloads. Created lazily on first spool, removed by Stop.
-	mediaMu  sync.Mutex
-	mediaDir string
-
 	mu sync.Mutex
 
 	// Cached tools and prompts, invalidated via MCP notifications and
@@ -431,7 +426,6 @@ func (ts *Toolset) Start(ctx context.Context) error {
 // Stop tears the supervisor down. Idempotent.
 func (ts *Toolset) Stop(ctx context.Context) error {
 	slog.DebugContext(ctx, "Stopping MCP toolset", "server", ts.logID)
-	defer ts.cleanupMediaDir()
 	if ts.supervisor == nil {
 		return nil
 	}
@@ -700,7 +694,7 @@ func (ts *Toolset) callTool(ctx context.Context, toolCall tools.ToolCall) (*tool
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
 
-	result := ts.processMCPContent(resp)
+	result := processMCPContent(resp)
 	slog.DebugContext(ctx, "MCP tool call completed", "tool", toolCall.Function.Name, "output_length", len(result.Output))
 	slog.DebugContext(ctx, result.Output)
 	return result, nil
@@ -720,13 +714,7 @@ func isInitNotificationSendError(err error) bool {
 	return false
 }
 
-const maxInlineMediaBytes = 256 * 1024
-
-// writeMediaFile is a package-level indirection so tests can simulate
-// disk failures without manipulating the filesystem.
-var writeMediaFile = defaultWriteMediaFile
-
-func (ts *Toolset) processMCPContent(toolResult *mcp.CallToolResult) *tools.ToolCallResult {
+func processMCPContent(toolResult *mcp.CallToolResult) *tools.ToolCallResult {
 	var text strings.Builder
 	var images, audios []tools.MediaContent
 
@@ -735,9 +723,9 @@ func (ts *Toolset) processMCPContent(toolResult *mcp.CallToolResult) *tools.Tool
 		case *mcp.TextContent:
 			text.WriteString(c.Text)
 		case *mcp.ImageContent:
-			images = append(images, ts.encodeMedia(c.Data, c.MIMEType))
+			images = append(images, encodeMedia(c.Data, c.MIMEType))
 		case *mcp.AudioContent:
-			audios = append(audios, ts.encodeMedia(c.Data, c.MIMEType))
+			audios = append(audios, encodeMedia(c.Data, c.MIMEType))
 		case *mcp.ResourceLink:
 			if c.Name != "" {
 				// Escape ] in name and ) in URI to prevent broken markdown links.
@@ -772,94 +760,12 @@ func (ts *Toolset) processMCPContent(toolResult *mcp.CallToolResult) *tools.Tool
 	}
 }
 
-// encodeMedia keeps small payloads inline and spools larger ones to disk so the
-// session and TUI do not retain duplicate base64 copies. Spooled files live
-// under a toolset-scoped temp directory removed by Stop.
-func (ts *Toolset) encodeMedia(data []byte, mimeType string) tools.MediaContent {
-	media := tools.MediaContent{MimeType: mimeType}
-	if len(data) <= maxInlineMediaBytes {
-		media.Data = base64.StdEncoding.EncodeToString(data)
-		return media
-	}
-
-	dir, err := ts.ensureMediaDir()
-	if err == nil {
-		var path string
-		path, err = writeMediaFile(dir, data, mimeType)
-		if err == nil {
-			media.FilePath = path
-			return media
-		}
-	}
-	slog.Warn("failed to spool MCP media to disk", "mime_type", mimeType, "bytes", len(data), "error", err)
-	media.Data = base64.StdEncoding.EncodeToString(data)
-	return media
-}
-
-// ensureMediaDir lazily creates the toolset-scoped temp dir for spooled
-// media payloads. The directory is removed by Stop.
-func (ts *Toolset) ensureMediaDir() (string, error) {
-	ts.mediaMu.Lock()
-	defer ts.mediaMu.Unlock()
-	if ts.mediaDir != "" {
-		return ts.mediaDir, nil
-	}
-	dir, err := os.MkdirTemp("", "docker-agent-mcp-media-*")
-	if err != nil {
-		return "", err
-	}
-	ts.mediaDir = dir
-	return dir, nil
-}
-
-// cleanupMediaDir removes the toolset-scoped media spool directory, if any.
-func (ts *Toolset) cleanupMediaDir() {
-	ts.mediaMu.Lock()
-	dir := ts.mediaDir
-	ts.mediaDir = ""
-	ts.mediaMu.Unlock()
-	if dir == "" {
-		return
-	}
-	if err := os.RemoveAll(dir); err != nil {
-		slog.Warn("failed to remove MCP media spool directory", "dir", dir, "error", err)
-	}
-}
-
-func defaultWriteMediaFile(dir string, data []byte, mimeType string) (string, error) {
-	f, err := os.CreateTemp(dir, "media-*"+mediaExtension(mimeType))
-	if err != nil {
-		return "", err
-	}
-	path := f.Name()
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		_ = os.Remove(path)
-		return "", err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
-		return "", err
-	}
-	return path, nil
-}
-
-func mediaExtension(mimeType string) string {
-	switch mimeType {
-	case "image/png":
-		return ".png"
-	case "image/jpeg":
-		return ".jpg"
-	case "image/gif":
-		return ".gif"
-	case "image/webp":
-		return ".webp"
-	case "audio/wav", "audio/wave", "audio/x-wav":
-		return ".wav"
-	case "audio/mpeg", "audio/mp3":
-		return ".mp3"
-	default:
-		return ".bin"
+// encodeMedia re-encodes raw bytes (as decoded by the MCP SDK) back to base64
+// for our internal MediaContent representation.
+func encodeMedia(data []byte, mimeType string) tools.MediaContent {
+	return tools.MediaContent{
+		Data:     base64.StdEncoding.EncodeToString(data),
+		MimeType: mimeType,
 	}
 }
 

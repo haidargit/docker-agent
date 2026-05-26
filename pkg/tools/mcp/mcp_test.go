@@ -1,12 +1,9 @@
 package mcp
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"iter"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -481,7 +478,7 @@ func TestProcessMCPContent(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			result := (&Toolset{}).processMCPContent(tt.input)
+			result := processMCPContent(tt.input)
 
 			assert.Equal(t, tt.wantOutput, result.Output)
 			assert.Equal(t, tt.wantIsError, result.IsError)
@@ -538,76 +535,4 @@ func TestCallToolRecoversFromErrSessionMissing(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "recovered", result.Output)
 	assert.Equal(t, int32(2), callCount.Load(), "expected exactly 2 CallTool invocations (1 failed + 1 retry)")
-}
-
-func TestProcessMCPContentSpoolsLargeMedia(t *testing.T) {
-	ts := &Toolset{}
-	t.Cleanup(ts.cleanupMediaDir)
-
-	tests := []struct {
-		name       string
-		size       int
-		wantInline bool
-	}{
-		{"at threshold stays inline", maxInlineMediaBytes, true},
-		{"above threshold spools", maxInlineMediaBytes + 1, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			data := bytes.Repeat([]byte("x"), tt.size)
-			result := ts.processMCPContent(callToolResult(&mcp.ImageContent{Data: data, MIMEType: "image/png"}))
-
-			require.Len(t, result.Images, 1)
-			img := result.Images[0]
-			assert.Equal(t, "image/png", img.MimeType)
-
-			if tt.wantInline {
-				assert.NotEmpty(t, img.Data)
-				assert.Empty(t, img.FilePath)
-				return
-			}
-
-			assert.Empty(t, img.Data)
-			require.NotEmpty(t, img.FilePath)
-
-			got, err := os.ReadFile(img.FilePath)
-			require.NoError(t, err)
-			assert.Equal(t, data, got)
-		})
-	}
-}
-
-func TestEncodeMediaFallsBackToInlineOnDiskFailure(t *testing.T) {
-	original := writeMediaFile
-	t.Cleanup(func() { writeMediaFile = original })
-	writeMediaFile = func(string, []byte, string) (string, error) {
-		return "", errors.New("disk full")
-	}
-
-	ts := &Toolset{}
-	t.Cleanup(ts.cleanupMediaDir)
-
-	data := bytes.Repeat([]byte("x"), maxInlineMediaBytes+1)
-	result := ts.processMCPContent(callToolResult(&mcp.ImageContent{Data: data, MIMEType: "image/png"}))
-
-	require.Len(t, result.Images, 1)
-	img := result.Images[0]
-	assert.Empty(t, img.FilePath)
-	assert.NotEmpty(t, img.Data, "falls back to inline base64 when disk write fails")
-}
-
-func TestToolsetStopRemovesMediaDir(t *testing.T) {
-	ts := &Toolset{}
-	data := bytes.Repeat([]byte("x"), maxInlineMediaBytes+1)
-	media := ts.encodeMedia(data, "image/png")
-	require.NotEmpty(t, media.FilePath)
-
-	_, err := os.Stat(media.FilePath)
-	require.NoError(t, err)
-
-	require.NoError(t, ts.Stop(t.Context()))
-
-	_, err = os.Stat(media.FilePath)
-	assert.True(t, os.IsNotExist(err), "spooled media file should be removed by Stop")
 }
