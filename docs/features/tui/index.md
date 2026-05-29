@@ -293,3 +293,15 @@ When an agent calls a tool, docker-agent shows a confirmation dialog by default.
   <p>Use <code>--yolo</code> or the <code>/yolo</code> command to auto-approve all tool calls. You can also toggle this mid-session. For aliases, set <code>--yolo</code> when creating the alias: <code>docker agent alias add fast agentcatalog/coder --yolo</code>.</p>
 
 </div>
+
+## Notifications
+
+The TUI displays transient notification banners for agent warnings, errors, and other runtime events. Notifications auto-dismiss after a short delay unless the mouse is hovering over them — hovering pauses the timer so you have time to read the message.
+
+| Interaction | Behaviour |
+| ----------- | --------- |
+| Hover       | Pauses auto-dismiss; the notification stays visible until the mouse moves away |
+| Click       | Copies the notification text to the clipboard |
+| × (close)   | Dismisses immediately; the glyph turns red when hovered |
+
+Hint text in the top-left corner of the notification border shows the available actions at a glance.

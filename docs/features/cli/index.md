@@ -152,6 +152,7 @@ $ docker agent serve api <agent-file>|<agents-dir>|<registry-ref> [flags]
 | Flag                       | Default            | Description                                                                                                |
 | -------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------- |
 | `-l, --listen <addr>`      | `127.0.0.1:8080`   | Address to listen on.                                                                                      |
+| `--auth-token <token>`     | (none)             | Bearer token required for all API requests. When set, every request must include `Authorization: Bearer <token>`. Leave empty to disable authentication (safe when listening on loopback interfaces only). |
 | `-s, --session-db <path>`  | `session.db`       | Path to the SQLite session database (relative paths resolve against the working directory).                |
 | `--pull-interval <minutes>`| `0`                | Periodically re-pull OCI/URL references and refresh the agent definition. `0` disables auto-pull.          |
 | `--fake <path>`             | (none)             | Replay AI responses from a cassette file (for testing). Mutually exclusive with `--record`.               |

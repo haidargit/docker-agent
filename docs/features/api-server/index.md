@@ -169,6 +169,7 @@ docker agent serve api <agent-file>|<agents-dir> [flags]
 | Flag               | Default          | Description                                      |
 | ------------------ | ---------------- | ------------------------------------------------ |
 | `-l, --listen`     | `127.0.0.1:8080` | Address to listen on                             |
+| `--auth-token`     | (none)           | Bearer token required for all API requests. Leave empty to disable authentication (safe when listening on loopback interfaces only). Recommended when `--listen` binds to a network-reachable interface. |
 | `-s, --session-db` | `session.db`     | Path to the SQLite session database              |
 | `--pull-interval`  | `0` (disabled)   | Auto-pull OCI reference every N minutes          |
 | `--fake`           | (none)           | Replay AI responses from cassette file (testing) |

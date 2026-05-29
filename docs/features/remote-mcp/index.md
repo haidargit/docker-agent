@@ -138,6 +138,13 @@ The client-driven `{access_token, ...}` reply shape is still accepted on the `--
 
 A per-toolset `callbackRedirectURL` (in the YAML) overrides the runtime-wide `--mcp-oauth-redirect-uri` for that toolset.
 
+<div class="callout callout-warning" markdown="1">
+<div class="callout-title">Security note
+</div>
+  <p>The <code>POST /api/mcp-oauth/callback</code> route is open by default (no auth required) when <code>--auth-token</code> is unset. State values are 128-bit opaque tokens, so brute-force is infeasible, but a state value that leaks (e.g. via debug logs or a compromised host) could be exploited by an attacker to inject a code. Set <code>--auth-token</code> when <code>docker agent serve api</code> listens on a network-reachable interface. When set, <code>--auth-token</code> enforces Bearer-token authentication on all API routes including this callback endpoint.</p>
+
+</div>
+
 ## Project Management &amp; Collaboration
 
 | Service    | URL                                | Transport | Description                           |
