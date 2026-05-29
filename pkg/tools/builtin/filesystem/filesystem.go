@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/docker/docker-agent/pkg/chat"
 	"github.com/docker/docker-agent/pkg/config"
@@ -1195,8 +1196,15 @@ func (t *ToolSet) handleSearchFilesContent(_ context.Context, args SearchFilesCo
 				preview := line
 				if len(preview) > 100 {
 					start := max(matchStart-20, 0)
-					end := matchEnd + 20
-					end = min(end, len(preview))
+					end := min(matchEnd+20, len(preview))
+					// Snap to rune boundaries so we never split a multi-byte
+					// UTF-8 sequence in the preview.
+					for start > 0 && !utf8.RuneStart(preview[start]) {
+						start--
+					}
+					for end < len(preview) && !utf8.RuneStart(preview[end]) {
+						end++
+					}
 					preview = preview[start:end]
 				}
 
