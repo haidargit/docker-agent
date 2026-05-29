@@ -340,8 +340,8 @@ func (d *filePickerDialog) renderEntry(entry fileEntry, selected bool, maxWidth 
 
 	name := entry.name
 	maxNameLen := max(1, maxWidth-20)
-	if len(name) > maxNameLen {
-		name = name[:maxNameLen-1] + "…"
+	if r := []rune(name); len(r) > maxNameLen {
+		name = string(r[:maxNameLen-1]) + "…"
 	}
 
 	line := nameStyle.Render(icon + name)
