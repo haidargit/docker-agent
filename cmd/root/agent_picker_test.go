@@ -47,7 +47,7 @@ func TestTruncateDetail(t *testing.T) {
 
 func TestAgentPickerRenderNoPanic(t *testing.T) {
 	choices := []agentChoice{
-		{ref: "default", description: "A helpful AI assistant"},
+		{ref: "default", description: "A helpful AI assistant", yaml: "agents:\n  root:\n    model: auto\n"},
 		{ref: "agentcatalog/some-really-long-agent-reference-name", description: strings.Repeat("very long description ", 20)},
 		{ref: "broken", err: errors.New("multi\nline\nerror that is also quite long and should be truncated cleanly")},
 	}
@@ -59,7 +59,38 @@ func TestAgentPickerRenderNoPanic(t *testing.T) {
 		m.width = w
 		m.height = 24
 		assert.NotPanics(t, func() { _ = m.render() })
+		m.openDetails()
+		assert.NotPanics(t, func() { _ = m.renderDetails() })
+		m.showDetails = false
 	}
+}
+
+func TestAgentPickerDetailsToggle(t *testing.T) {
+	m := newAgentPickerModel([]agentChoice{
+		{ref: "default", yaml: "agents:\n  root:\n    model: auto\n"},
+	})
+	m.width = 80
+	m.height = 24
+
+	assert.False(t, m.showDetails)
+	m.openDetails()
+	assert.True(t, m.showDetails)
+	assert.Contains(t, m.details.GetContent(), "model: auto")
+}
+
+func TestDetailsContent(t *testing.T) {
+	m := newAgentPickerModel(nil)
+	assert.Equal(t, "a: b", m.detailsContent(agentChoice{yaml: "a: b\n\n"}))
+	assert.Contains(t, m.detailsContent(agentChoice{err: errors.New("boom")}), "boom")
+	assert.Equal(t, "No configuration available.", m.detailsContent(agentChoice{}))
+}
+
+func TestPercentLabel(t *testing.T) {
+	assert.Equal(t, "0%", percentLabel(0))
+	assert.Equal(t, "50%", percentLabel(0.5))
+	assert.Equal(t, "100%", percentLabel(1))
+	assert.Equal(t, "0%", percentLabel(-0.5))
+	assert.Equal(t, "100%", percentLabel(2))
 }
 
 func TestAgentPickerModelNavigation(t *testing.T) {

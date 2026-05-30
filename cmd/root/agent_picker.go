@@ -3,9 +3,11 @@ package root
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -27,6 +29,7 @@ var errAgentPickerCancelled = errors.New("agent selection cancelled")
 type agentChoice struct {
 	ref         string // agent reference as passed on the command line
 	description string // one-line description loaded from the agent config
+	yaml        string // raw config YAML, shown in the details dialog
 	err         error  // non-nil when the config could not be loaded
 }
 
@@ -44,6 +47,10 @@ func loadAgentChoices(ctx context.Context, refs []string, env environment.Provid
 			choice.err = err
 			choices = append(choices, choice)
 			continue
+		}
+
+		if raw, err := source.Read(ctx); err == nil {
+			choice.yaml = string(raw)
 		}
 
 		cfg, err := config.Load(ctx, source)
@@ -94,10 +101,11 @@ func selectAgentRef(ctx context.Context, refs []string, env environment.Provider
 
 // agentPickerKeyMap holds the key bindings for the agent picker.
 type agentPickerKeyMap struct {
-	Up     key.Binding
-	Down   key.Binding
-	Choose key.Binding
-	Quit   key.Binding
+	Up      key.Binding
+	Down    key.Binding
+	Choose  key.Binding
+	Details key.Binding
+	Quit    key.Binding
 }
 
 var agentPickerKeys = agentPickerKeyMap{
@@ -113,6 +121,10 @@ var agentPickerKeys = agentPickerKeyMap{
 		key.WithKeys("enter", " "),
 		key.WithHelp("enter", "select"),
 	),
+	Details: key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "view yaml"),
+	),
 	Quit: key.NewBinding(
 		key.WithKeys("esc", "ctrl+c", "q"),
 		key.WithHelp("esc", "cancel"),
@@ -126,10 +138,18 @@ type agentPickerModel struct {
 	width     int
 	height    int
 	cancelled bool
+
+	// showDetails toggles the scrollable YAML dialog overlay for the
+	// currently selected agent.
+	showDetails bool
+	details     viewport.Model
 }
 
 func newAgentPickerModel(choices []agentChoice) *agentPickerModel {
-	return &agentPickerModel{choices: choices}
+	return &agentPickerModel{
+		choices: choices,
+		details: viewport.New(),
+	}
 }
 
 func (m *agentPickerModel) Init() tea.Cmd { return nil }
@@ -151,8 +171,22 @@ func (m *agentPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.resizeDetails()
 		return m, nil
 	case tea.KeyPressMsg:
+		// While the YAML dialog is open it captures all keys: scrolling is
+		// delegated to the viewport, and any close key dismisses it.
+		if m.showDetails {
+			switch {
+			case key.Matches(msg, agentPickerKeys.Quit), key.Matches(msg, agentPickerKeys.Details):
+				m.showDetails = false
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.details, cmd = m.details.Update(msg)
+			return m, cmd
+		}
+
 		switch {
 		case key.Matches(msg, agentPickerKeys.Quit):
 			m.cancelled = true
@@ -163,6 +197,9 @@ func (m *agentPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, agentPickerKeys.Down):
 			m.moveDown()
 			return m, nil
+		case key.Matches(msg, agentPickerKeys.Details):
+			m.openDetails()
+			return m, nil
 		case key.Matches(msg, agentPickerKeys.Choose):
 			return m, tea.Quit
 		}
@@ -170,8 +207,63 @@ func (m *agentPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// detailsDialogSize returns the width and height of the YAML dialog, leaving a
+// margin around the screen so it reads as an overlay.
+func (m *agentPickerModel) detailsDialogSize() (w, h int) {
+	w = m.width - 8
+	h = m.height - 6
+	if w > 100 {
+		w = 100
+	}
+	if w < 20 {
+		w = 20
+	}
+	if h < 5 {
+		h = 5
+	}
+	return w, h
+}
+
+// resizeDetails keeps the viewport sized to the current dialog dimensions.
+// The viewport content area sits inside the dialog border (1) and padding (2)
+// on each side, plus a title and help line (3 rows).
+func (m *agentPickerModel) resizeDetails() {
+	w, h := m.detailsDialogSize()
+	m.details.SetWidth(w - 2*(1+2))
+	m.details.SetHeight(h - 2*1 - 3)
+}
+
+// openDetails loads the selected agent's YAML into the viewport and shows the
+// dialog.
+func (m *agentPickerModel) openDetails() {
+	if m.cursor < 0 || m.cursor >= len(m.choices) {
+		return
+	}
+	m.resizeDetails()
+	m.details.SetContent(m.detailsContent(m.choices[m.cursor]))
+	m.details.GotoTop()
+	m.showDetails = true
+}
+
+// detailsContent returns the text shown in the YAML dialog for a choice.
+func (m *agentPickerModel) detailsContent(choice agentChoice) string {
+	switch {
+	case choice.yaml != "":
+		return strings.TrimRight(choice.yaml, "\n")
+	case choice.err != nil:
+		return "Failed to load agent:\n\n" + choice.err.Error()
+	default:
+		return "No configuration available."
+	}
+}
+
 func (m *agentPickerModel) View() tea.View {
-	body := m.render()
+	var body string
+	if m.showDetails {
+		body = m.renderDetails()
+	} else {
+		body = m.render()
+	}
 	centered := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, body)
 
 	view := tea.NewView(centered)
@@ -216,8 +308,9 @@ func (m *agentPickerModel) render() string {
 
 	help := styles.MutedStyle.Render(
 		strings.Join([]string{
-			agentPickerKeys.Up.Help().Key + " " + agentPickerKeys.Up.Help().Desc,
+			"↑↓ move",
 			agentPickerKeys.Choose.Help().Key + " " + agentPickerKeys.Choose.Help().Desc,
+			agentPickerKeys.Details.Help().Key + " " + agentPickerKeys.Details.Help().Desc,
 			agentPickerKeys.Quit.Help().Key + " " + agentPickerKeys.Quit.Help().Desc,
 		}, "   "),
 	)
@@ -237,6 +330,36 @@ func (m *agentPickerModel) render() string {
 		BorderForeground(styles.BorderSecondary).
 		Padding(1, 3).
 		Render(content)
+}
+
+// renderDetails renders the scrollable YAML dialog for the selected agent.
+func (m *agentPickerModel) renderDetails() string {
+	w, _ := m.detailsDialogSize()
+	contentWidth := w - 2*(1+2)
+
+	ref := m.choices[m.cursor].ref
+	title := styles.DialogTitleStyle.Width(contentWidth).Render(toolcommon.TruncateText(ref, contentWidth))
+
+	scrollHint := ""
+	if !m.details.AtTop() || !m.details.AtBottom() {
+		scrollHint = "  •  " + percentLabel(m.details.ScrollPercent())
+	}
+	help := styles.DialogHelpStyle.Render("↑↓ scroll" + scrollHint + "   esc/? close")
+
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		m.details.View(),
+		help,
+	)
+
+	return styles.DialogStyle.Width(w - 2).Render(content)
+}
+
+// percentLabel formats a scroll fraction (0..1) as a percentage string.
+func percentLabel(frac float64) string {
+	pct := min(max(int(frac*100), 0), 100)
+	return strconv.Itoa(pct) + "%"
 }
 
 func (m *agentPickerModel) renderCard(choice agentChoice, cardWidth int, selected bool) string {
