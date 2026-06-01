@@ -58,3 +58,39 @@ func IsAuthorizationRequired(err error) bool {
 	var target *AuthorizationRequiredError
 	return errors.As(err, &target)
 }
+
+// OAuthDeclinedError is returned by the transport when the user explicitly
+// declines or cancels an interactive OAuth authorization flow (e.g. by
+// clicking "Cancel" on the host's Authentication Request dialog).
+//
+// It is intentionally distinct from AuthorizationRequiredError: the latter
+// is a silent deferral pending an interactive context, while a decline is
+// a deliberate user action. Callers MUST NOT immediately retry the OAuth
+// flow on a decline — that would re-emit the dialog the user just
+// dismissed, which is exactly the bug this sentinel exists to prevent.
+//
+// Typical handling is for the caller (e.g. the MCP catalog toolset) to
+// remove the server from its active set so subsequent tool enumerations
+// don't kick off a fresh OAuth flow. Re-enabling the server (e.g. via
+// the catalog's enable meta-tool) is the natural way for the user to
+// say "actually, please retry".
+type OAuthDeclinedError struct {
+	URL string
+}
+
+func (e *OAuthDeclinedError) Error() string {
+	if e.URL == "" {
+		return "OAuth authorization was declined or cancelled by the user"
+	}
+	return "OAuth authorization to " + e.URL + " was declined or cancelled by the user"
+}
+
+// IsOAuthDeclined reports whether err (or any error wrapped by it) signals
+// that the user explicitly declined or cancelled an interactive OAuth
+// authorization flow. Callers use this to break the
+// "Tools() -> Start() -> OAuth elicitation" retry loop so the dismissed
+// dialog does not immediately re-appear on the next loop iteration.
+func IsOAuthDeclined(err error) bool {
+	var target *OAuthDeclinedError
+	return errors.As(err, &target)
+}

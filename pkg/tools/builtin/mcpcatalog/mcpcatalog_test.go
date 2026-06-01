@@ -122,14 +122,20 @@ func TestEnableDisableLifecycle(t *testing.T) {
 	res, err := ts.handleEnable(ctx, EnableArgs{ID: oauthID})
 	require.NoError(t, err)
 	require.False(t, res.IsError, "enable failed: %s", res.Output)
-	assert.Contains(t, res.Output, "enabled")
-	// The OAuth-branch wording was intentionally removed: the model has
-	// no agency over the OAuth flow, so the tool result no longer mentions
-	// "OAuth" or "authorization" — the previous "elicited on the next
-	// turn" wording caused the model to stop and ask the user to repeat
-	// themselves. See handleEnable for the rationale.
-	assert.NotContains(t, res.Output, "OAuth", "tool result must not leak OAuth details to the model")
-	assert.NotContains(t, res.Output, "authorization", "tool result must not leak OAuth details to the model")
+	assert.Contains(t, res.Output, "enable requested",
+		"tool result must record the enable request so the model has something to ground its next turn on")
+	// The tool result MUST set up a self-check for the next turn: if no
+	// `<id>_` tools appear, the user dismissed the authorization dialog
+	// and the model must NOT pretend the server is connected. This was
+	// the regression that motivated the wording change — the previous
+	// "the server's tools will appear on your next turn. Proceed with
+	// the user's original request" was a flat promise the runtime cannot
+	// actually keep when OAuth is required, and the model parroted it
+	// even after the user clicked Cancel.
+	assert.Contains(t, res.Output, oauthID+"_",
+		"tool result must reference the tool-name prefix so the model can verify whether the server actually came online")
+	assert.Contains(t, res.Output, "dismissed",
+		"tool result must explicitly cover the user-dismissed-the-dialog branch so the model does not hallucinate access")
 	assert.Equal(t, int32(1), changes.Load(), "enable should fire tools-changed handler exactly once")
 
 	ts.mu.RLock()
@@ -395,7 +401,7 @@ func TestEnableAPIKeyEnvPresent(t *testing.T) {
 	res, err := ts.handleEnable(t.Context(), EnableArgs{ID: apiKeyID})
 	require.NoError(t, err)
 	require.False(t, res.IsError)
-	assert.Contains(t, res.Output, "enabled")
+	assert.Contains(t, res.Output, "enable requested")
 	// With every required env var present, no WARNING line is emitted —
 	// the tool result is intentionally terse so the model proceeds to the
 	// user's original request rather than narrating setup.
@@ -819,6 +825,166 @@ func TestDisableAndResetAuthGatedOnEnabledServers(t *testing.T) {
 	names = toolNames(mustTools(t, ctx, ts))
 	assert.NotContains(t, names, ToolNameDisable, "disable must be hidden again once no server is enabled")
 	assert.NotContains(t, names, ToolNameResetAuth, "reset_auth must be hidden again once no server is enabled")
+}
+
+// declineOnStartToolSet is a minimal ToolSet+Startable whose Start returns
+// the OAuthDeclinedError sentinel on every call. It exists so the catalog
+// can be tested for "user dismissed the auth dialog -> server is removed
+// from the enabled set, no further retries" without driving a real OAuth
+// handshake.
+type declineOnStartToolSet struct {
+	url        string
+	startCalls atomic.Int32
+	stopCalls  atomic.Int32
+}
+
+func (d *declineOnStartToolSet) Tools(context.Context) ([]tools.Tool, error) {
+	// Tools() must never be reachable: Start() always errors, so
+	// StartableToolSet.IsStarted stays false and Tools() in the catalog
+	// short-circuits the entry on every iteration.
+	return nil, errors.New("declineOnStartToolSet.Tools should never be called")
+}
+
+func (d *declineOnStartToolSet) Start(context.Context) error {
+	d.startCalls.Add(1)
+	return &mcptools.OAuthDeclinedError{URL: d.url}
+}
+
+func (d *declineOnStartToolSet) Stop(context.Context) error {
+	d.stopCalls.Add(1)
+	return nil
+}
+
+// TestToolsOAuthDeclineRemovesServer is the regression test for the
+// "Cancel doesn't dismiss the Authentication Request" bug: a Start()
+// returning OAuthDeclinedError must cause the catalog to (a) drop the
+// server from t.enabled, (b) Stop the inner toolset, (c) notify the
+// runtime that the tool surface changed, and (d) not call Start() a
+// second time on the next Tools() iteration — which is what previously
+// caused the dialog to re-appear in the host on every agent loop turn.
+func TestToolsOAuthDeclineRemovesServer(t *testing.T) {
+	ts := New(stubEnv{vars: map[string]string{}})
+	const id = "decline-server"
+	server := Server{
+		ID:        id,
+		Title:     "Decline",
+		URL:       "https://example.test/mcp",
+		Transport: "streamable-http",
+		Auth:      Auth{Type: "oauth"},
+	}
+	ts.catalog.Servers = append(ts.catalog.Servers, server)
+	ts.byID[id] = server
+
+	fake := &declineOnStartToolSet{url: server.URL}
+	wrapped := tools.NewStartable(fake)
+
+	var changes atomic.Int32
+	ts.SetToolsChangedHandler(func() { changes.Add(1) })
+
+	// Inject directly — handleEnable would build a real *mcp.Toolset
+	// that we cannot easily steer into a decline without a full OAuth
+	// fake server.
+	ts.mu.Lock()
+	ts.enabled[id] = wrapped
+	ts.mu.Unlock()
+
+	ctx := t.Context()
+
+	// First Tools() call: Start() returns OAuthDeclinedError. The
+	// catalog must swallow it cleanly (no error to the runtime) and
+	// remove the server. Meta-tool gating (disable / reset_auth) is
+	// computed from a snapshot taken BEFORE we iterate, so those tools
+	// are still expected on this first call; we assert the gating
+	// behaviour on the second call below where the mutation has
+	// already taken effect.
+	list, err := ts.Tools(ctx)
+	require.NoError(t, err, "Tools() must not propagate a user decline as an error")
+
+	names := toolNames(list)
+	for _, meta := range []string{ToolNameSearch, ToolNameList, ToolNameEnable} {
+		assert.Contains(t, names, meta, "meta tools must still be present after a decline")
+	}
+
+	ts.mu.RLock()
+	_, stillEnabled := ts.enabled[id]
+	ts.mu.RUnlock()
+	assert.False(t, stillEnabled,
+		"declined server must be removed from t.enabled so the next Tools() call does not re-trigger OAuth")
+
+	assert.Equal(t, int32(1), fake.startCalls.Load(),
+		"Start() must be called exactly once before the decline removes the entry")
+	assert.Equal(t, int32(1), fake.stopCalls.Load(),
+		"the declined toolset must be Stop()'d so any partially-initialised session is cleaned up")
+	assert.Equal(t, int32(1), changes.Load(),
+		"tools-changed must fire so the runtime / UI sees the server is no longer enabled")
+
+	// Second Tools() call: the entry is gone, so the fake must not be
+	// touched again. This is the property that breaks the
+	// "dialog re-appears on every loop iteration" loop.
+	list, err = ts.Tools(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), fake.startCalls.Load(),
+		"Start() must NOT be called again after the decline: the server is no longer enabled")
+	assert.Equal(t, int32(1), changes.Load(),
+		"tools-changed must fire exactly once for a single decline")
+
+	names = toolNames(list)
+	assert.NotContains(t, names, ToolNameDisable,
+		"disable must be hidden once the declined server has been removed from the enabled set")
+	assert.NotContains(t, names, ToolNameResetAuth,
+		"reset_auth must be hidden once the declined server has been removed from the enabled set")
+}
+
+// TestToolsOAuthDeclineNoNotifyWhenAlreadyDisabled covers the race where
+// the model called disable_remote_mcp_server (or reset_remote_mcp_server_auth)
+// between the OAuth flow being initiated and the user declining it. In that
+// case the entry has already been removed and notify() has already fired;
+// disableAfterDecline must not double-notify.
+func TestToolsOAuthDeclineNoNotifyWhenAlreadyDisabled(t *testing.T) {
+	ts := New(stubEnv{vars: map[string]string{}})
+	const id = "decline-server-concurrent"
+	server := Server{
+		ID:        id,
+		Title:     "Decline",
+		URL:       "https://example.test/mcp",
+		Transport: "streamable-http",
+		Auth:      Auth{Type: "oauth"},
+	}
+	ts.catalog.Servers = append(ts.catalog.Servers, server)
+	ts.byID[id] = server
+
+	fake := &declineOnStartToolSet{url: server.URL}
+	wrapped := tools.NewStartable(fake)
+
+	var changes atomic.Int32
+	ts.SetToolsChangedHandler(func() { changes.Add(1) })
+
+	// Simulate "fresh enable replaced our entry": Tools() captures the
+	// snapshot under RLock, releases it, then we mutate t.enabled. When
+	// Start() fails on the captured wrapper, disableAfterDecline must
+	// notice current != wrapped and skip the notify.
+	ts.mu.Lock()
+	ts.enabled[id] = wrapped
+	ts.mu.Unlock()
+
+	// Take a snapshot the same way Tools() does, then swap the entry.
+	ts.mu.Lock()
+	supersede := tools.NewStartable(&declineOnStartToolSet{url: server.URL})
+	ts.enabled[id] = supersede
+	ts.mu.Unlock()
+
+	ts.disableAfterDecline(t.Context(), id, wrapped)
+
+	ts.mu.RLock()
+	current, stillEnabled := ts.enabled[id]
+	ts.mu.RUnlock()
+	require.True(t, stillEnabled, "the superseding entry must remain enabled")
+	require.Same(t, supersede, current, "the superseding entry must not be evicted by a stale decline cleanup")
+
+	assert.Equal(t, int32(1), fake.stopCalls.Load(),
+		"the stale wrapper must still be Stop()'d to clean its partially-initialised session")
+	assert.Zero(t, changes.Load(),
+		"no notification must fire when the entry has already been replaced — the replacing call notified")
 }
 
 func mustTools(t *testing.T, ctx context.Context, ts *Toolset) []tools.Tool {

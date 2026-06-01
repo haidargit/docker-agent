@@ -302,6 +302,15 @@ type oauthTransport struct {
 	// instead of unwrapping to know that OAuth was deferred rather than
 	// failed for some other reason.
 	lastAuthRequired bool
+	// lastOAuthDeclined records when the user explicitly declined or
+	// cancelled an interactive OAuth flow (clicked "Cancel" on the host's
+	// Authentication Request dialog). Same rationale as lastAuthRequired:
+	// the MCP SDK wraps transport errors with %v before they reach our
+	// callers, so errors.As cannot reliably recover the underlying
+	// *OAuthDeclinedError. enrichConnectError reads this flag to
+	// reconstitute a clean sentinel for the catalog's retry-loop short
+	// circuit (see mcpcatalog.Toolset.Tools / disableAfterDecline).
+	lastOAuthDeclined bool
 }
 
 func (t *oauthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -323,7 +332,41 @@ func (t *oauthTransport) authorizeOnce(ctx context.Context, authServer, wwwAuth 
 		return nil
 	}
 
-	return t.handleOAuthFlow(ctx, authServer, wwwAuth)
+	// Sticky decline: the MCP SDK's Connect() runs several
+	// initialize-stage RPCs concurrently. Each one that gets a 401
+	// queues here on oauthFlowMu. Without this short-circuit, the
+	// goroutine that wins the mutex runs the full OAuth flow; when
+	// the user clicks Cancel, this goroutine returns OAuthDeclinedError
+	// and releases the mutex — at which point the NEXT queued
+	// goroutine sees no valid token and fires a fresh OAuth flow,
+	// re-popping the dialog the user just dismissed. Latching the
+	// decline state under the same mutex makes the queued callers
+	// see the prior decline before they can start a new flow.
+	t.mu.Lock()
+	declined := t.lastOAuthDeclined
+	t.mu.Unlock()
+	if declined {
+		slog.DebugContext(ctx, "OAuth flow short-circuited: user already declined on this transport", "url", t.baseURL)
+		return &OAuthDeclinedError{URL: t.baseURL}
+	}
+
+	err := t.handleOAuthFlow(ctx, authServer, wwwAuth)
+	if err != nil {
+		// Latch the decline state BEFORE the deferred Unlock fires so
+		// any goroutine queued on oauthFlowMu observes it on its next
+		// iteration of the getValidToken / declined / handleOAuthFlow
+		// dance. Setting this in roundTrip (after we return) would
+		// race: the queued goroutine would acquire the mutex first
+		// and start a fresh flow while we are still bubbling the
+		// error up the stack.
+		var declinedErr *OAuthDeclinedError
+		if errors.As(err, &declinedErr) {
+			t.mu.Lock()
+			t.lastOAuthDeclined = true
+			t.mu.Unlock()
+		}
+	}
+	return err
 }
 
 func (t *oauthTransport) roundTrip(req *http.Request, isRetry bool) (*http.Response, error) {
@@ -391,6 +434,24 @@ func (t *oauthTransport) roundTrip(req *http.Request, isRetry bool) (*http.Respo
 					t.lastAuthRequired = true
 					t.mu.Unlock()
 					return nil, authErr
+				}
+				// User-driven decline of the host's Authentication
+				// Request dialog. Flag it explicitly so callers can
+				// recover the sentinel through enrichConnectError —
+				// the SDK's transport-error wrapping (fmt.Errorf
+				// "%w: %v") otherwise destroys the unwrap chain. See
+				// remote.go enrichConnectError + the lastAuthRequired
+				// pattern this mirrors.
+				var declinedErr *OAuthDeclinedError
+				if errors.As(err, &declinedErr) {
+					slog.Debug("OAuth flow declined by user", "url", t.baseURL)
+					if declinedErr.URL == "" {
+						declinedErr.URL = t.baseURL
+					}
+					t.mu.Lock()
+					t.lastOAuthDeclined = true
+					t.mu.Unlock()
+					return nil, declinedErr
 				}
 				return nil, fmt.Errorf("OAuth flow failed: %w", err)
 			}
@@ -496,6 +557,17 @@ func (t *oauthTransport) authorizationRequired() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.lastAuthRequired
+}
+
+// oauthDeclined reports whether the user explicitly declined or cancelled
+// the most recent interactive OAuth flow handled by this transport.
+// Mirrors authorizationRequired: callers use this to recognise the
+// user-cancelled case despite the MCP SDK's %v-wrapping destroying the
+// underlying *OAuthDeclinedError sentinel in the unwrap chain.
+func (t *oauthTransport) oauthDeclined() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lastOAuthDeclined
 }
 
 // extractServerMessage extracts a short, human-readable message from a
@@ -1106,7 +1178,12 @@ func (t *oauthTransport) handleUnmanagedOAuthFlow(ctx context.Context, authServe
 		}
 		slog.DebugContext(ctx, "Received elicitation response from client", "action", er.result.Action)
 		if er.result.Action != tools.ElicitationActionAccept {
-			return errors.New("OAuth flow declined or cancelled by client")
+			// Surface a recognisable sentinel so callers (notably the
+			// MCP catalog toolset) can distinguish "user dismissed the
+			// dialog" from a generic transport/server failure and skip
+			// the otherwise-infinite Tools() -> Start() -> elicitation
+			// retry that would re-pop the dialog the user just closed.
+			return &OAuthDeclinedError{URL: t.baseURL}
 		}
 		if er.result.Content == nil {
 			return errors.New("no payload received from client")

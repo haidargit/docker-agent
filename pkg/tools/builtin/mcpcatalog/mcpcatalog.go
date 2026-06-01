@@ -480,6 +480,14 @@ func (t *Toolset) Tools(ctx context.Context) ([]tools.Tool, error) {
 
 		if !e.ts.IsStarted() {
 			if err := e.ts.Start(ctx); err != nil {
+				// Diagnostic breadcrumb so the deferred-vs-declined
+				// classification is visible in --debug logs without
+				// having to instrument the OAuth transport itself.
+				slog.DebugContext(ctx, "Enabled remote MCP server failed to start",
+					"id", e.id,
+					"auth_required", mcp.IsAuthorizationRequired(err),
+					"oauth_declined", mcp.IsOAuthDeclined(err),
+					"error", err)
 				// Auth-required is an *expected* deferral when probing
 				// with a non-interactive context (startup tool count) or
 				// when the elicitation bridge is not yet ready. Silent
@@ -488,6 +496,18 @@ func (t *Toolset) Tools(ctx context.Context) ([]tools.Tool, error) {
 				if mcp.IsAuthorizationRequired(err) {
 					slog.DebugContext(ctx, "Remote MCP server requires authorization; deferred to next turn",
 						"id", e.id)
+					continue
+				}
+				// User explicitly dismissed the host's authorization
+				// dialog (clicked "Cancel" / "Decline"). Treat that as
+				// "deactivate this server" so the very next Tools()
+				// call does not re-fire the OAuth flow and re-pop the
+				// dialog the user just closed. The model can re-enable
+				// the server explicitly if the user changes their mind.
+				if mcp.IsOAuthDeclined(err) {
+					slog.InfoContext(ctx, "Remote MCP server OAuth declined by user; removing from enabled set",
+						"id", e.id)
+					t.disableAfterDecline(ctx, e.id, e.ts)
 					continue
 				}
 				// Real failure: log once per streak (StartableToolSet
@@ -703,7 +723,9 @@ func (t *Toolset) handleEnable(ctx context.Context, args EnableArgs) (*tools.Too
 	}
 
 	msg := strings.Builder{}
-	fmt.Fprintf(&msg, "enabled %q (%s) — the server's tools will appear on your next turn. Proceed with the user's original request; the host handles any required connection setup.\n", id, server.Title)
+	fmt.Fprintf(&msg, "enable requested for %q (%s). The host will surface any required authorization dialog. On your next turn:\n", id, server.Title)
+	fmt.Fprintf(&msg, "  - if tools whose names start with %q appear in your available tools, proceed with the user's original request using them.\n", id+"_")
+	fmt.Fprintf(&msg, "  - if NO such tools appear, the user dismissed the authorization dialog. Do NOT claim the server is connected and do NOT ask the user for workspace details to use \"the available tools\" (there are none). Tell the user the request needs them to authorize the connection. If the user then re-asks for the same thing (or says \"yes\", \"retry\", \"try again\", etc.), call %s for this id again to surface a fresh authorization dialog.\n", ToolNameEnable)
 	fmt.Fprintf(&msg, "endpoint: %s\n", server.URL)
 	// Only surface unresolved env vars — the model can act on those by
 	// asking the user to set the variable and retrying. Every other auth
@@ -794,6 +816,43 @@ func unresolvedHeaderEnvs(headers map[string]string) []string {
 // DisableArgs is the input schema for disable_remote_mcp_server.
 type DisableArgs struct {
 	ID string `json:"id" jsonschema:"Catalog id of the server to disable."`
+}
+
+// disableAfterDecline removes a server from the enabled set after the user
+// declined its OAuth flow, mirroring handleDisable's lifecycle invariants
+// (delete from t.enabled, stop the inner toolset, notify the runtime that
+// the tool surface changed) but without producing a model-facing tool
+// result — the decline happens asynchronously inside Tools(), not in
+// response to a model tool call.
+//
+// The guard (current == wrapped) protects against a concurrent
+// handleDisable / handleResetAuth / handleEnable that already swapped or
+// removed the entry between the failing Start() and this cleanup.
+func (t *Toolset) disableAfterDecline(ctx context.Context, id string, wrapped *tools.StartableToolSet) {
+	t.mu.Lock()
+	current, stillEnabled := t.enabled[id]
+	if stillEnabled && current == wrapped {
+		delete(t.enabled, id)
+	} else {
+		// Already gone (or replaced by a fresh enable) — let whoever
+		// owns the live wrapper handle its lifecycle. We still want
+		// to stop OUR reference because Start() may have left the
+		// session in a partially-initialised state.
+		stillEnabled = false
+	}
+	notify := t.toolsChangedHandler
+	t.mu.Unlock()
+
+	if err := wrapped.Stop(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		slog.DebugContext(ctx, "Failed to stop declined-OAuth remote MCP toolset",
+			"id", id, "error", err)
+	}
+
+	// Only notify when WE removed the entry; if a concurrent caller
+	// already mutated t.enabled, they will have notified themselves.
+	if stillEnabled && notify != nil {
+		notify()
+	}
 }
 
 func (t *Toolset) handleDisable(ctx context.Context, args DisableArgs) (*tools.ToolCallResult, error) {

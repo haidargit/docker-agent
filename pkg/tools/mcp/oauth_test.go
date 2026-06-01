@@ -1406,6 +1406,117 @@ func TestUnmanagedOAuthFlow_DriveFlow_ExchangesCodeForToken(t *testing.T) {
 	assert.Equal(t, srv.URL, tok.AuthServer)
 }
 
+// TestUnmanagedOAuthFlow_ElicitationDeclineReturnsSentinel verifies that
+// when the user dismisses the host's Authentication Request dialog
+// (action=decline), the OAuth round-trip surfaces a recognisable
+// *OAuthDeclinedError, NOT a generic error.
+//
+// This sentinel is the contract that lets the mcp catalog toolset break
+// the "Tools() -> Start() -> elicitation" retry loop: a generic error
+// looks like a transient failure and gets retried on the next agent
+// loop iteration, which is exactly what would cause the dismissed
+// dialog to re-appear immediately.
+func TestUnmanagedOAuthFlow_ElicitationDeclineReturnsSentinel(t *testing.T) {
+	srv := newUnmanagedOAuthTestServer(t)
+	defer srv.Close()
+
+	const redirectURI = "https://example.test/oauth/cb"
+	capture := &elicitCaptured{}
+	capture.replyFn = func(_ *gomcp.ElicitParams) tools.ElicitationResult {
+		return tools.ElicitationResult{Action: tools.ElicitationActionDecline}
+	}
+	transport, _ := newUnmanagedTestTransport(t, srv.URL, redirectURI, capture)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, strings.NewReader("{}"))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, rtErr := transport.RoundTrip(req)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	require.Error(t, rtErr)
+	assert.True(t, IsOAuthDeclined(rtErr),
+		"declined elicitation must surface as IsOAuthDeclined so the catalog can short-circuit the retry loop; got: %v", rtErr)
+
+	var declined *OAuthDeclinedError
+	require.ErrorAs(t, rtErr, &declined)
+	assert.Equal(t, srv.URL, declined.URL,
+		"the sentinel must carry the server URL so callers can correlate it back to a catalog entry")
+
+	assert.Equal(t, int32(0), srv.tokenCalls.Load(),
+		"token endpoint must NOT be hit when the user declined the authorization")
+}
+
+// TestUnmanagedOAuthFlow_ElicitationDeclineLatchesAgainstConcurrentRoundTrips
+// is the regression test for the "Cancel re-pops the dialog" bug. The MCP
+// SDK's Connect() fires several initialize-stage RPCs in parallel; each
+// gets a 401 and queues on oauthFlowMu. Without the sticky-decline latch
+// inside authorizeOnce, the FIRST queued goroutine returns
+// OAuthDeclinedError on user cancel and releases the mutex; the NEXT
+// queued goroutine then sees no valid token and starts a fresh OAuth
+// flow, re-emitting the elicitation the user just dismissed.
+//
+// This test fires N concurrent RoundTrips. The elicitation handler
+// declines on the first invocation. The expected behaviour: exactly
+// ONE elicitation is sent (no re-pop), and every concurrent roundtrip
+// returns OAuthDeclinedError.
+func TestUnmanagedOAuthFlow_ElicitationDeclineLatchesAgainstConcurrentRoundTrips(t *testing.T) {
+	srv := newUnmanagedOAuthTestServer(t)
+	defer srv.Close()
+
+	const redirectURI = "https://example.test/oauth/cb"
+	const concurrentRoundTrips = 4
+
+	var elicitationCount atomic.Int32
+	capture := &elicitCaptured{}
+	capture.replyFn = func(_ *gomcp.ElicitParams) tools.ElicitationResult {
+		elicitationCount.Add(1)
+		return tools.ElicitationResult{Action: tools.ElicitationActionDecline}
+	}
+	transport, _ := newUnmanagedTestTransport(t, srv.URL, redirectURI, capture)
+
+	type rtOut struct {
+		resp *http.Response
+		err  error
+	}
+	results := make(chan rtOut, concurrentRoundTrips)
+	for range concurrentRoundTrips {
+		go func() {
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, strings.NewReader("{}"))
+			if err != nil {
+				results <- rtOut{nil, err}
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := transport.RoundTrip(req)
+			// Close the body in the goroutine that owns the
+			// response (bodyclose linter cannot see the receiver
+			// side closing it through a channel send).
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			results <- rtOut{resp, err}
+		}()
+	}
+
+	for range concurrentRoundTrips {
+		select {
+		case out := <-results:
+			require.Error(t, out.err)
+			assert.True(t, IsOAuthDeclined(out.err),
+				"every concurrent roundtrip must surface IsOAuthDeclined after the user declined; got: %v", out.err)
+		case <-time.After(10 * time.Second):
+			t.Fatal("timeout waiting for concurrent OAuth round-trips to complete")
+		}
+	}
+
+	assert.Equal(t, int32(1), elicitationCount.Load(),
+		"exactly one elicitation must be sent: subsequent queued roundtrips must observe the latched decline state and short-circuit before opening a new dialog")
+	assert.Equal(t, int32(0), srv.tokenCalls.Load(),
+		"token endpoint must NOT be hit when the user declined")
+}
+
 // TestUnmanagedOAuthFlow_DriveFlow_RejectsStateMismatch verifies the CSRF
 // check: if the client returns a `state` value that doesn't match what
 // docker-agent generated and embedded in the authorize URL, the flow

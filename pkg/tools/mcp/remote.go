@@ -127,6 +127,12 @@ func (c *remoteMCPClient) Initialize(ctx context.Context, _ *gomcp.InitializeReq
 //
 // Pre: err != nil and t != nil; only called from the Connect failure path.
 func enrichConnectError(err error, t *oauthTransport) error {
+	// Order matters: a decline implies the interactive OAuth flow
+	// actually ran, so lastOAuthDeclined wins over lastAuthRequired in
+	// the (in practice impossible) case that both flags are set.
+	if t.oauthDeclined() {
+		return &OAuthDeclinedError{URL: t.baseURL}
+	}
 	if t.authorizationRequired() {
 		return &AuthorizationRequiredError{URL: t.baseURL}
 	}
