@@ -84,7 +84,7 @@ restriction visible to the model so it can adjust its plan.
 
 ### Post-Edit Hooks
 
-Automatically run formatting or other commands after file edits:
+Automatically run formatting, linting, or other commands after the agent edits a file. The command fires once per file after each edit operation (including `write_file`, `patch_file`, and similar mutations). Use `${file}` as a placeholder for the absolute path of the edited file.
 
 ```yaml
 toolsets:
@@ -95,7 +95,18 @@ toolsets:
         cmd: "gofmt -w ${file}"
       - path: "*.ts"
         cmd: "prettier --write ${file}"
+      - path: "src/**/*.py"
+        cmd: "black ${file}"
 ```
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `path` | string | Glob pattern matched against the file path. `*.go` matches any `.go` file; `src/**/*.ts` matches `.ts` files anywhere under `src/`. |
+| `cmd` | string | Shell command to run. `${file}` expands to the absolute path of the just-edited file. |
+
+Post-edit commands run with the same working directory as the agent. If a command exits non-zero, the error is logged and surfaced to the model as a warning, but the edit is not rolled back.
+
+See [`examples/post_edit.yaml`](https://github.com/docker/docker-agent/blob/main/examples/post_edit.yaml) for a complete example.
 
 <div class="callout callout-tip" markdown="1">
 <div class="callout-title">Tip

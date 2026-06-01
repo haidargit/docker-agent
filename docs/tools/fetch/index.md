@@ -163,3 +163,16 @@ Responses are capped at **1 MB** per URL. Hosts that disallow the agent's user-a
 </div>
   <p>Use <code>fetch</code> when the agent needs to read arbitrary public URLs at runtime. Use the <a href="{{ '/tools/api/' | relative_url }}">API tool</a> to expose specific, structured HTTP endpoints (including non-<code>GET</code> verbs) as named tools.</p>
 </div>
+
+## Domain Filtering
+
+The `allowed_domains`, `blocked_domains`, and `allow_private_ips` options let you control which hosts the fetch tool may reach. The complete reference is in the [Options](#options) table and [Domain matching](#domain-matching) section above.
+
+**Key points:**
+
+- `allowed_domains` — allow-list; only listed hosts (and their subdomains for bare-domain entries) are reachable
+- `blocked_domains` — deny-list; takes priority over allowed; cannot be combined with `allowed_domains`
+- `allow_private_ips` — defaults to `false`; set to `true` to reach loopback / RFC-1918 / link-local addresses
+- The same `allow_private_ips` flag applies to [remote MCP toolsets]({{ '/tools/mcp/' | relative_url }}) when their OAuth helper needs to reach internal servers
+
+See [`examples/fetch_domain_filtering.yaml`](https://github.com/docker/docker-agent/blob/main/examples/fetch_domain_filtering.yaml) for a complete filtering example, and [`examples/remote_mcp_allow_private_ips.yaml`](https://github.com/docker/docker-agent/blob/main/examples/remote_mcp_allow_private_ips.yaml) for the equivalent pattern on remote MCP toolsets.

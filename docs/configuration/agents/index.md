@@ -55,6 +55,12 @@ agents:
       case_sensitive: boolean
       trim_spaces: boolean
       path: string
+    harness: # Optional: delegate to an external coding CLI (Claude Code, Codex, opencode, pi)
+      type: string # Required: claude-code | codex | opencode | pi
+      model: string # Optional: model override forwarded to the CLI
+      effort: string # claude-code only: low | medium | high | max
+      agent: string # opencode only: agent profile name
+      thinking: boolean # opencode only: enable extended thinking
 ```
 
 <div class="callout callout-tip" markdown="1">
@@ -86,11 +92,12 @@ agents:
 | `num_history_items`         | int     | ✗        | Limit the number of conversation history messages sent to the model. Useful for managing context window size with long conversations. Default: unlimited (all messages sent). |
 | `skills`                    | bool/array | ✗     | Enable automatic skill discovery. `true` loads all discovered local skills, `false` disables them. A list can mix skill sources (`local` or `https://…` URLs) and skill names to include — see [Skills]({{ '/features/skills/' | relative_url }}).                                                     |
 | `commands`                  | object  | ✗        | Named prompts that can be run with `docker agent run config.yaml /command_name`. Can be simple strings or objects with `instruction` and/or `agent` fields for agent switching. See [Named Commands](#named-commands) below. |
-| `welcome_message`           | string  | ✗        | Message displayed to the user when a session starts. Useful for providing context or instructions.                                                                            |
+| `welcome_message`           | string  | ✗        | Message displayed to the user when a session starts. Rendered as Markdown in the TUI. **Not sent to the model** — it exists purely for the user's benefit. Useful for telling users what the agent can do and what commands are available. |
 | `handoffs`                  | array   | ✗        | List of agent names this agent can hand off the conversation to. Enables the `handoff` tool. See [Handoffs Routing]({{ '/concepts/multi-agent/#handoffs-routing' | relative_url }}).                  |
 | `hooks`                     | object  | ✗        | Lifecycle hooks for running commands at various points. See [Hooks]({{ '/configuration/hooks/' | relative_url }}).                                                                                   |
 | `structured_output`         | object  | ✗        | Constrain agent output to match a JSON schema. See [Structured Output]({{ '/configuration/structured-output/' | relative_url }}).                                                                    |
 | `cache`                     | object  | ✗        | Response cache. When the same user question is asked again, the previous answer is replayed verbatim and the model is not called. See [Response Cache](#response-cache) below.                  |
+| `harness`                   | object  | ✗        | Run this agent through an external coding CLI instead of a model. See [Coding Harnesses]({{ '/features/harnesses/' | relative_url }}). |
 
 <div class="callout callout-warning" markdown="1">
 <div class="callout-title">max_iterations
@@ -293,6 +300,54 @@ Commands support two formats:
    ```
 
 When `agent` is set without `instruction`, any text typed after the slash command (e.g., `/plan build a web app`) is forwarded as a prompt to the target agent. The target agent must be listed in the current agent's `sub_agents` array.
+
+### Agent-Switching Commands
+
+Commands with an `agent` field switch the active agent for that command's scope. This is useful for building workflow shortcuts where `/plan`, `/review`, `/deploy` each route the user to the appropriate specialist.
+
+```yaml
+agents:
+  root:
+    model: openai/gpt-5-mini
+    description: Main assistant
+    instruction: You are a project coordinator.
+    sub_agents: [planner, reviewer]
+    commands:
+      # Switch to planner with a pre-filled prompt
+      plan:
+        agent: planner
+        instruction: "Create a detailed plan for: $1"
+      # Switch to reviewer; any text after /review is forwarded
+      review:
+        agent: reviewer
+      # Simple prompt command (no switching)
+      status: "Summarize what we have accomplished so far"
+
+  planner:
+    model: openai/gpt-5-mini
+    description: Planning specialist
+    instruction: You create detailed project plans.
+
+  reviewer:
+    model: anthropic/claude-sonnet-4-5
+    description: Code review specialist
+    instruction: You review code and suggest improvements.
+```
+
+**Agent-switching vs. `handoff`**
+
+| | Agent-switching command | `handoff` tool |
+| --- | --- | --- |
+| **Trigger** | User runs `/command` | Model calls `handoff()` |
+| **Session** | Stays in the same session | Stays in the same session |
+| **History** | Target agent sees full conversation | Target agent sees full conversation |
+| **Return** | User must explicitly switch back | Target agent can chain to another agent |
+
+**Agent-switching vs. `transfer_task`**
+
+`transfer_task` launches a **sub-session**: the root agent sends a task, the child runs in isolation, and the result is returned to the root. The root agent stays in control and the child's work is never in the main conversation. Use `transfer_task` (via `sub_agents`) when you want delegation with a clean result; use agent-switching commands when you want to *become* a different agent for the rest of the conversation.
+
+See [`examples/agent_switching_commands.yaml`](https://github.com/docker/docker-agent/blob/main/examples/agent_switching_commands.yaml) for a complete example.
 
 ```bash
 # Run commands from the CLI

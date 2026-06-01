@@ -197,6 +197,8 @@ settings:
 
 Omit `snapshot` or set it to `false` to leave automatic snapshots off; manually configured snapshot hooks still run.
 
+See [`examples/snapshot_hooks.yaml`](https://github.com/docker/docker-agent/blob/main/examples/snapshot_hooks.yaml) for a complete snapshot hook configuration.
+
 <div class="callout callout-warning" markdown="1">
 <div class="callout-title">Two flavors of <code>max_iterations</code>
 </div>
@@ -278,7 +280,7 @@ Notes:
 - `tool_response` for `post_tool_use` carries the tool's result; `tool_error` is `true` when the tool failed (the failure detail is surfaced inside `tool_response`).
 - `prompt` is only populated for `user_prompt_submit`. Sub-sessions (transferred tasks, background agents, skills) do **not** fire this event because their kick-off message is synthesised by the runtime, not authored by the user.
 - `stop_response` carries the model's final assistant text for `stop`, `after_llm_call`, and `subagent_stop`. `last_user_message` carries the latest user message at dispatch time.
-- `model_id` is populated for `after_llm_call` (and `before_llm_call`) in the canonical `<provider>/<model>` form (e.g. `anthropic/claude-sonnet-4-5`). For harness agents the value is the harness label rather than the canonical form.
+- `model_id` is populated for `after_llm_call` (and `before_llm_call`) in the canonical `<provider>/<model>` form (e.g. `anthropic/claude-sonnet-4-5`). For harness agents, `model_id` is the harness label (e.g. `claude-code`) rather than a canonical model name — see [Coding Harnesses]({{ '/features/harnesses/' | relative_url }}).
 - `context_limit` is `0` when the model definition is unavailable (treat `0` as "unknown", not as a real limit).
 - `approval_decision` is one of `allow`, `deny`, `canceled`. `approval_source` is a stable classifier of which step decided (e.g. `yolo`, `session_permissions_allow`, `session_permissions_deny`, `team_permissions_allow`, `team_permissions_deny`, `pre_tool_use_hook_allow`, `pre_tool_use_hook_deny`, `readonly_hint`, `user_approved`, `user_approved_session`, `user_approved_tool`, `user_rejected`, `context_canceled`).
 

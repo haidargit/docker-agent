@@ -174,7 +174,9 @@ toolsets:
 
 ### TOON-encoded outputs
 
-Re-encode verbose JSON outputs as the compact [TOON](https://github.com/alpkeskin/gotoon) format to save context budget. Typically yields 30–60% smaller payloads on list/search tools:
+Re-encode verbose JSON outputs as the compact [TOON](https://github.com/alpkeskin/gotoon) format to save context budget. Typically yields 30–60% smaller payloads on list/search tools.
+
+`toon` is a regex string that is matched against tool names. Any tool whose name matches the pattern has its JSON output transparently re-encoded as TOON before it is shown to the model. The re-encoding reduces schema verbosity, which is especially useful when a model struggles with large or repetitive tool output.
 
 ```yaml
 toolsets:
@@ -185,6 +187,10 @@ toolsets:
     command: my-server
     toon: "list_.*,get_.*" # only toonify list_/get_ tools
 ```
+
+The value is a comma-separated list of regexes (or a single regex). A tool name must match at least one pattern to be re-encoded. Setting `toon: ".*"` re-encodes all tools from that toolset.
+
+See [`examples/github-toon.yaml`](https://github.com/docker/docker-agent/blob/main/examples/github-toon.yaml) for a practical example using the GitHub MCP server.
 
 ### Per-toolset model routing
 

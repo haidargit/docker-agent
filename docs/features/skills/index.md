@@ -306,5 +306,6 @@ The skill will automatically be available to any agent with skills enabled (`ski
 <div class="callout-title">See also
 </div>
   <p>Skills are enabled in the <a href="{{ '/configuration/agents/' | relative_url }}">Agent Config</a> with the <code>skills</code> property (boolean or list). For tool-based capabilities, see <a href="{{ '/concepts/tools/' | relative_url }}">Tools</a>.</p>
+  <p>Example configs: <a href="https://github.com/docker/docker-agent/blob/main/examples/skills_inline.yaml"><code>examples/skills_inline.yaml</code></a> (inline skill definition), <a href="https://github.com/docker/docker-agent/blob/main/examples/skills_filter.yaml"><code>examples/skills_filter.yaml</code></a> (filtering which skills load).</p>
 
 </div>

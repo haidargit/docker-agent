@@ -275,6 +275,8 @@ The TUI exposes the supervisor through two slash commands:
 
 See the [TUI reference]({{ '/features/tui/' | relative_url }}) for the full list of slash commands.
 
+See [`examples/lifecycle.yaml`](https://github.com/docker/docker-agent/blob/main/examples/lifecycle.yaml) for a complete lifecycle configuration example.
+
 ## TOON-Encoded Tool Outputs
 
 Many MCP servers return verbose JSON responses that consume a lot of context budget. The `toon` field on a toolset transparently re-encodes matching tools' JSON output as [TOON](https://github.com/alpkeskin/gotoon) — a compact, model-friendly key/value format — before the result is shown to the model.
@@ -368,9 +370,45 @@ toolsets:
       Label new issues with 'triage' by default.
 ```
 
+By default, the `instruction:` field **replaces** the toolset's built-in instructions (if any). To keep the built-in guidance and add your own rules on top, include the `{ORIGINAL_INSTRUCTIONS}` placeholder anywhere in your instruction text. At runtime it expands to the toolset's default instructions:
+
+```yaml
+toolsets:
+  # Enrich: keep built-in instructions, then add your own rules
+  - type: filesystem
+    instruction: |
+      {ORIGINAL_INSTRUCTIONS}
+
+      ## Project-specific rules
+      - Never modify files outside the `src/` directory.
+      - Always create a backup before overwriting a file.
+
+  # Enrich: prepend your rules before the built-in instructions
+  - type: shell
+    instruction: |
+      Important: only run commands inside the project root.
+      {ORIGINAL_INSTRUCTIONS}
+
+  # Replace: omit the placeholder to discard built-in instructions entirely
+  - type: mcp
+    ref: docker:github-official
+    instruction: |
+      Only read GitHub issues. Never create, edit, or close anything.
+```
+
+Three patterns at a glance:
+
+| Pattern | Description |
+| --- | --- |
+| `{ORIGINAL_INSTRUCTIONS}` then your text | Append your rules after the defaults |
+| Your text then `{ORIGINAL_INSTRUCTIONS}` | Prepend your rules before the defaults |
+| No placeholder | Replace the defaults entirely |
+
+See [`examples/toolset_instructions.yaml`](https://github.com/docker/docker-agent/blob/main/examples/toolset_instructions.yaml) for a complete example.
+
 ## Deferred Tool Loading
 
-Load tools on-demand to speed up agent startup:
+Load tools on-demand to speed up agent startup. When a toolset is deferred, its tools are registered lazily — the tool server process is not started until the agent first calls one of its tools. This is useful for large toolsets (e.g., an MCP server with hundreds of tools) where startup time matters.
 
 ```yaml
 toolsets:
@@ -393,6 +431,10 @@ toolsets:
       - "list_issues"
       - "search_repos"
 ```
+
+When `defer` is a list of tool names, only those specific tools are deferred; all other tools in the toolset load eagerly. Setting `defer: true` defers the entire toolset.
+
+See [`examples/deferred.yaml`](https://github.com/docker/docker-agent/blob/main/examples/deferred.yaml) for a complete example.
 
 ## Combined Example
 

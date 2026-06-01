@@ -167,6 +167,8 @@ Like other inheritable model settings, `task_budget` can also be declared on a
 [provider definition]({{ '/providers/custom/' | relative_url }}) and is
 inherited by every model that references that provider.
 
+See [`examples/task_budget.yaml`](https://github.com/docker/docker-agent/blob/main/examples/task_budget.yaml) for a complete example.
+
 ## Interleaved Thinking
 
 For Anthropic and Bedrock Claude models, interleaved thinking allows tool calls during model reasoning. This is enabled by default:
