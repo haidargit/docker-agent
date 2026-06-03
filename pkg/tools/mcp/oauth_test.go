@@ -159,9 +159,7 @@ func TestGetValidToken_UsesStoredCredentialsForRefresh(t *testing.T) {
 	}
 
 	got := transport.getValidToken(t.Context())
-	if got == nil {
-		t.Fatal("getValidToken returned nil, expected refreshed token")
-	}
+	require.NotNil(t, got, "getValidToken returned nil, expected refreshed token")
 	if got.AccessToken != "fresh-at" {
 		t.Errorf("AccessToken = %q, want %q", got.AccessToken, "fresh-at")
 	}
@@ -245,9 +243,7 @@ func TestGetValidToken_UsesStoredAuthServerForRefresh(t *testing.T) {
 	}
 
 	got := transport.getValidToken(t.Context())
-	if got == nil {
-		t.Fatal("getValidToken returned nil, expected refreshed token")
-	}
+	require.NotNil(t, got, "getValidToken returned nil, expected refreshed token")
 	if got.AccessToken != "fresh-at" {
 		t.Fatalf("AccessToken = %q, want %q", got.AccessToken, "fresh-at")
 	}
@@ -870,9 +866,7 @@ func TestOAuthTransportAllowPrivateIPsControlsOAuthClient(t *testing.T) {
 
 	allowPrivateIPsTransport := newTransport(oauthHTTPClientForAllowPrivateIPs(true))
 	got := allowPrivateIPsTransport.getValidToken(t.Context())
-	if got == nil {
-		t.Fatal("getValidToken with allow_private_ips OAuth client returned nil, want refreshed token")
-	}
+	require.NotNil(t, got, "getValidToken with allow_private_ips OAuth client returned nil, want refreshed token")
 	if got.AccessToken != "fresh-at" {
 		t.Fatalf("AccessToken = %q, want fresh-at", got.AccessToken)
 	}
