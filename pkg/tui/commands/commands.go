@@ -33,8 +33,8 @@ type Item struct {
 	SlashCommand string
 	Execute      ExecuteFunc
 	Hidden       bool // Hidden commands work as slash commands but don't appear in the palette
-	// Immediate marks that the command can be executed immediately as it does not
-	// interrupt any ongoing stream.
+	// Immediate marks commands that should run as soon as they are submitted
+	// instead of being treated as ordinary queued chat input.
 	Immediate bool
 }
 
@@ -452,14 +452,20 @@ func BuildCommandCategories(ctx context.Context, application *app.App) []Categor
 	if len(agentCommands) > 0 {
 		var commands []Item
 		for name, cmd := range agentCommands {
+			commandName := name
 			commands = append(commands, Item{
-				ID:           "agent.command." + name,
-				Label:        name,
+				ID:           "agent.command." + commandName,
+				Label:        commandName,
 				Description:  toolcommon.TruncateText(cmd.DisplayText(), 60),
 				Category:     "Agent Commands",
-				SlashCommand: "/" + name,
-				Execute: func(string) tea.Cmd {
-					return core.CmdHandler(messages.AgentCommandMsg{Command: "/" + name})
+				SlashCommand: "/" + commandName,
+				Immediate:    true,
+				Execute: func(arg string) tea.Cmd {
+					input := "/" + commandName
+					if arg = strings.TrimSpace(arg); arg != "" {
+						input += " " + arg
+					}
+					return core.CmdHandler(messages.AgentCommandMsg{Command: input})
 				},
 			})
 		}
@@ -556,12 +562,13 @@ func BuildCommandCategories(ctx context.Context, application *app.App) []Categor
 				Description:  description,
 				Category:     "Skills",
 				SlashCommand: "/" + skillName,
+				Immediate:    true,
 				Execute: func(arg string) tea.Cmd {
 					input := "/" + skillName
 					if arg = strings.TrimSpace(arg); arg != "" {
 						input += " " + arg
 					}
-					return core.CmdHandler(messages.SendMsg{Content: input})
+					return core.CmdHandler(messages.SendMsg{Content: input, BypassQueue: true})
 				},
 			})
 		}

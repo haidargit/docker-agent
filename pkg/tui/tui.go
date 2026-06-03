@@ -847,7 +847,7 @@ func (m *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case messages.SendMsg:
 		// Forward send messages to the active content view
-		if m.history != nil {
+		if m.history != nil && !msg.BypassQueue {
 			_ = m.history.Add(msg.Content)
 		}
 		return m.forwardChat(msg)

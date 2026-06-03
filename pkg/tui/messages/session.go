@@ -96,6 +96,7 @@ type (
 	SendMsg struct {
 		Content     string       // Full content sent to the agent (with file contents expanded)
 		Attachments []Attachment // Attached files or inline content (e.g. pastes)
+		BypassQueue bool         // Process immediately even while the agent is working.
 	}
 
 	// SendAttachmentMsg is a message for the first message with an attachment.
