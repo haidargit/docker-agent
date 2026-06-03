@@ -667,7 +667,7 @@ func (m *appModel) handleAgentCommand(command string) (tea.Model, tea.Cmd) {
 	}
 
 	if resolved != "" && switchSucceeded {
-		cmds = append(cmds, core.CmdHandler(messages.SendMsg{Content: resolved}))
+		cmds = append(cmds, core.CmdHandler(messages.SendMsg{Content: resolved, BypassQueue: true}))
 	}
 
 	return m, tea.Batch(cmds...)
