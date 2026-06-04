@@ -18,6 +18,9 @@
 #                     - runs each time queued steering messages are drained
 #                       (mid-turn, after stop, or while idle); AdditionalContext
 #                       is TRANSIENT, like user_prompt_submit
+#   user_followup_submit
+#                     - runs each time a queued follow-up message starts a fresh
+#                       turn at end-of-turn; AdditionalContext is TRANSIENT
 #   turn_start        - per-turn context; AdditionalContext is TRANSIENT
 #   turn_end          - per-turn finalizer; fires no matter why the turn ended
 #   before_llm_call   - just before each model call (observability, guardrails)
@@ -69,6 +72,7 @@
 #   /tmp/agent-session.log         (session_start, session_end)
 #   /tmp/agent-prompts.log         (user_prompt_submit)
 #   /tmp/agent-steering.log        (user_steering_messages_submit)
+#   /tmp/agent-followups.log       (user_followup_submit)
 #   /tmp/agent-llm-calls.log       (before_llm_call, after_llm_call)
 #   /tmp/agent-turns.log           (turn_end)
 #   /tmp/agent-tool-results.log    (post_tool_use)
@@ -238,6 +242,26 @@ agents:
             if [ "$COUNT" -gt 0 ]; then
               echo '{"hook_specific_output":{"additional_context":"The user sent new instructions while you were working — re-read the latest user messages and adjust course before continuing."}}'
             fi
+
+      # ====================================================================
+      # USER-FOLLOWUP-SUBMIT - runs each time the runtime dequeues a
+      # follow-up message at the end of a turn and starts a fresh turn
+      # for it. Follow-ups are user messages queued for end-of-turn
+      # processing (the FollowUp API / queue), distinct from mid-turn
+      # steering: the model sees them as fresh input. The follow-up text
+      # is in the prompt field. Like user_prompt_submit, you can block
+      # the run (decision=block / continue=false / exit code 2) or inject
+      # additional_context, which becomes a TRANSIENT system message for
+      # the follow-up turn only (never persisted).
+      # ====================================================================
+      user_followup_submit:
+        - type: command
+          timeout: 5
+          command: |
+            INPUT=$(cat)
+            SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
+            echo "$INPUT" | jq -r '.prompt' \
+              | sed "s/^/[$(date)] [$SESSION_ID] followup: /" >> /tmp/agent-followups.log
 
       # ====================================================================
       # TURN-START - runs at the start of every model call.

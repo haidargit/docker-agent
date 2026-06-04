@@ -59,6 +59,17 @@ const (
 	// the steered turn only — the same transient treatment as
 	// user_prompt_submit, never persisted to the session.
 	EventUserSteeringMessagesSubmit EventType = "user_steering_messages_submit"
+	// EventUserFollowupSubmit fires once each time the runtime dequeues a
+	// follow-up message at the end of a turn and starts a fresh turn for
+	// it. Follow-ups are user messages queued for end-of-turn processing
+	// (the FollowUp API / queue), distinct from mid-turn steering: the
+	// model sees them as fresh input, not an interruption. The follow-up
+	// text is delivered in [Input.Prompt]. Returning decision="block" (or
+	// continue=false / exit code 2) stops the run loop. AdditionalContext
+	// is spliced into the conversation as a transient system message for
+	// the follow-up turn only — the same transient treatment as
+	// user_prompt_submit, never persisted to the session.
+	EventUserFollowupSubmit EventType = "user_followup_submit"
 	// EventTurnStart fires at the start of every agent turn (each model
 	// call). AdditionalContext is injected transiently and never persisted.
 	EventTurnStart EventType = "turn_start"
@@ -259,6 +270,7 @@ type Input struct {
 	// Stop / AfterLLMCall / SubagentStop: the model's final response content.
 	StopResponse string `json:"stop_response,omitempty"`
 	// UserPromptSubmit specific: the text the user just submitted.
+	// UserFollowupSubmit also uses this field for the dequeued follow-up text.
 	Prompt string `json:"prompt,omitempty"`
 	// UserSteeringMessagesSubmit specific: the user messages the runtime
 	// just drained from the steering queue, in submission order.

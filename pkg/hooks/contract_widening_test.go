@@ -187,6 +187,39 @@ func TestUserSteeringMessagesSubmitBlockProducesDenyResult(t *testing.T) {
 		"hook must see the drained steering messages via Input.SteeringMessages")
 }
 
+// TestUserFollowupSubmitBlockProducesDenyResult pins the contract for
+// the user_followup_submit event: a hook returning decision="block"
+// must produce Result.Allowed=false so the runtime can stop the run
+// after dequeuing a follow-up, and the follow-up text must be visible
+// via Input.Prompt.
+func TestUserFollowupSubmitBlockProducesDenyResult(t *testing.T) {
+	t.Parallel()
+
+	r := hooks.NewRegistry()
+	require.NoError(t, r.RegisterBuiltin("followup_guard", func(_ context.Context, in *hooks.Input, _ []string) (*hooks.Output, error) {
+		return &hooks.Output{
+			Decision: hooks.DecisionBlockValue,
+			Reason:   "followup rejected: " + in.Prompt,
+		}, nil
+	}))
+
+	exec := hooks.NewExecutorWithRegistry(&hooks.Config{
+		UserFollowupSubmit: []hooks.Hook{{
+			Type:    hooks.HookTypeBuiltin,
+			Command: "followup_guard",
+		}},
+	}, t.TempDir(), nil, r)
+
+	res, err := exec.Dispatch(t.Context(), hooks.EventUserFollowupSubmit, &hooks.Input{
+		SessionID: "s",
+		Prompt:    "do the follow-up thing",
+	})
+	require.NoError(t, err)
+	assert.False(t, res.Allowed)
+	assert.Contains(t, res.Message, "do the follow-up thing",
+		"hook must see the dequeued follow-up text via Input.Prompt")
+}
+
 // TestPreCompactBlockProducesDenyResult pins the contract for the
 // pre_compact event: a hook returning decision="block" must produce
 // Result.Allowed=false so summarizeWithSource skips compaction.

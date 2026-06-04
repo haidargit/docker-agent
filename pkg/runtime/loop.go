@@ -726,6 +726,15 @@ func (r *LocalRuntime) runTurn(
 			userMsg := session.UserMessage(followUp.Content, followUp.MultiContent...)
 			sess.AddMessage(userMsg)
 			events.Emit(UserMessage(followUp.Content, sess.ID, followUp.MultiContent, len(sess.Messages)-1))
+			stop, msg, ctxMsgs := r.executeUserFollowupSubmitHooks(ctx, sess, a, followUp.Content, events)
+			if stop {
+				slog.WarnContext(ctx, "user_followup_submit hook signalled run termination",
+					"agent", a.Name(), "session_id", sess.ID, "reason", msg)
+				r.emitHookDrivenShutdown(ctx, a, sess, msg, events)
+				endReason = turnEndReasonHookBlocked
+				return turnExit
+			}
+			ls.userPromptMsgs = ctxMsgs
 			r.compactIfNeeded(ctx, sess, a, contextLimit, messageCountBeforeTools, events)
 			endReason = turnEndReasonContinue
 			return turnContinue // re-enter the loop for a new turn

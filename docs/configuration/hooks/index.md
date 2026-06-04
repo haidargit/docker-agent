@@ -43,6 +43,7 @@ docker-agent dispatches the following hook events:
 | `session_start`             | When a session begins or resumes                                                  | No         |
 | `user_prompt_submit`        | Once per user message, after submission and before the model runs                 | Yes        |
 | `user_steering_messages_submit` | Each time queued steering messages are drained (mid-turn, after stop, or while idle) | Yes    |
+| `user_followup_submit`      | Each time a queued follow-up message starts a fresh turn (end-of-turn)             | Yes        |
 | `turn_start`                | At the start of every agent turn (each model call)                                | No         |
 | `turn_end`                  | At the end of every agent turn — fires no matter why the turn ended               | No         |
 | `before_llm_call`           | Just before every model call (after `turn_start`)                                 | Yes        |
@@ -258,6 +259,7 @@ In addition to the common fields, each event ships its own payload:
 | `session_start`             | `source` — one of `startup`, `resume`, `clear`, `compact`                                                             |
 | `user_prompt_submit`        | `prompt` — the text the user just submitted                                                                           |
 | `user_steering_messages_submit` | `steering_messages` — the drained steering messages, in submission order                                         |
+| `user_followup_submit`      | `prompt` — the text of the dequeued follow-up message                                                                |
 | `turn_start`                | _none_ (just the common fields)                                                                                       |
 | `turn_end`                  | `agent_name`, `reason` — one of `normal`, `continue`, `steered`, `error`, `canceled`, `hook_blocked`, `loop_detected` |
 | `before_llm_call`           | `iteration` — 1-based run-loop iteration counter (the model call this hook is gating), `model_id`                    |
@@ -282,6 +284,7 @@ Notes:
 - `tool_response` for `post_tool_use` carries the tool's result; `tool_error` is `true` when the tool failed (the failure detail is surfaced inside `tool_response`).
 - `prompt` is only populated for `user_prompt_submit`. Sub-sessions (transferred tasks, background agents, skills) do **not** fire this event because their kick-off message is synthesised by the runtime, not authored by the user.
 - `steering_messages` is only populated for `user_steering_messages_submit`. It carries the user messages the runtime just drained from the steering queue — messages submitted while the agent was already working (mid-turn, after the model stopped, or while idle before the first model call).
+- `prompt` is also populated for `user_followup_submit`, carrying the text of the dequeued follow-up message (a user message queued for end-of-turn processing via the FollowUp API / queue, as opposed to mid-turn steering).
 - `stop_response` carries the model's final assistant text for `stop`, `after_llm_call`, and `subagent_stop`. `last_user_message` carries the latest user message at dispatch time.
 - `model_id` is populated for `after_llm_call` (and `before_llm_call`) in the canonical `<provider>/<model>` form (e.g. `anthropic/claude-sonnet-4-5`). For harness agents, `model_id` is the harness label (e.g. `claude-code`) rather than a canonical model name — see [Coding Harnesses]({{ '/features/harnesses/' | relative_url }}).
 - `context_limit` is `0` when the model definition is unavailable (treat `0` as "unknown", not as a real limit).
@@ -343,7 +346,7 @@ This is the symmetric counterpart of `pre_tool_use`'s `updated_input`, applied t
 
 ### Context-Contributing Events
 
-For `session_start`, `user_prompt_submit`, `user_steering_messages_submit`, `turn_start`, `post_tool_use`, `pre_compact`, and `stop`, hooks may set `hook_specific_output.additional_context` to inject text into the conversation. `turn_start` context is **transient** (recomputed every turn, never persisted); `session_start` context **persists** for the life of the session. `user_steering_messages_submit` context is **transient** like `user_prompt_submit` — it is spliced into the steered turn only and never persisted. (`worktree_create` also surfaces stdout, but to the CLI user rather than the conversation — the session doesn't exist yet.)
+For `session_start`, `user_prompt_submit`, `user_steering_messages_submit`, `user_followup_submit`, `turn_start`, `post_tool_use`, `pre_compact`, and `stop`, hooks may set `hook_specific_output.additional_context` to inject text into the conversation. `turn_start` context is **transient** (recomputed every turn, never persisted); `session_start` context **persists** for the life of the session. `user_steering_messages_submit` and `user_followup_submit` context is **transient** like `user_prompt_submit` — it is spliced into the steered/follow-up turn only and never persisted. (`worktree_create` also surfaces stdout, but to the CLI user rather than the conversation — the session doesn't exist yet.)
 
 ### Before-Compaction Specific Output
 
@@ -362,7 +365,7 @@ Returning `decision: "block"` (or exit code 2) instead vetoes the compaction ent
 
 ### Plain Text Output
 
-For `session_start`, `user_prompt_submit`, `user_steering_messages_submit`, `turn_start`, `post_tool_use`, `pre_compact`, and `stop` hooks, plain text written to stdout (i.e., output that is not valid JSON) is captured as additional context for the agent. For `pre_compact` it is appended to the compaction prompt; for the others it is spliced into the conversation as a (transient or persisted) system message depending on the event.
+For `session_start`, `user_prompt_submit`, `user_steering_messages_submit`, `user_followup_submit`, `turn_start`, `post_tool_use`, `pre_compact`, and `stop` hooks, plain text written to stdout (i.e., output that is not valid JSON) is captured as additional context for the agent. For `pre_compact` it is appended to the compaction prompt; for the others it is spliced into the conversation as a (transient or persisted) system message depending on the event.
 
 ## Exit Codes
 
@@ -678,6 +681,26 @@ hooks:
         if [ "$COUNT" -gt 0 ]; then
           echo '{"hook_specific_output":{"additional_context":"The user sent new instructions while you were working — re-read the latest user messages and adjust course before continuing."}}'
         fi
+```
+
+### User-Followup-Submit: gate or enrich queued follow-ups
+
+`user_followup_submit` is the follow-up-queue analogue of `user_prompt_submit`. It fires each time the runtime dequeues a follow-up message at the end of a turn and starts a fresh turn for it. Follow-ups are user messages queued for end-of-turn processing (the FollowUp API / queue) — distinct from mid-turn steering: the model sees a follow-up as fresh input, not an interruption, and each follow-up gets a full undivided turn. The follow-up text is in `prompt`. Use it to:
+
+- block a queued follow-up that violates policy (`decision: block` / exit code 2),
+- inject per-follow-up context (`additional_context` is spliced as a transient system message for the follow-up turn — never persisted, exactly like `user_prompt_submit`),
+- audit follow-up messages to a log.
+
+This closes the gap left by `user_prompt_submit`, which fires only for the first interactive prompt and never for queued follow-ups.
+
+```yaml
+hooks:
+  user_followup_submit:
+    - type: command
+      timeout: 5
+      command: |
+        INPUT=$(cat)
+        echo "$INPUT" | jq -r '.prompt' >> /tmp/agent-followups.log
 ```
 
 ### Subagent-Stop: observe handoff completions

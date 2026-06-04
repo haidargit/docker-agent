@@ -564,6 +564,29 @@ func (r *LocalRuntime) executeUserSteeringMessagesSubmitHooks(ctx context.Contex
 	return false, "", contextMessages(result)
 }
 
+// executeUserFollowupSubmitHooks fires user_followup_submit each time
+// the runtime dequeues a follow-up message at the end of a turn and
+// starts a fresh turn for it. Follow-ups are user messages queued for
+// end-of-turn processing (the FollowUp API / queue), distinct from
+// mid-turn steering. It mirrors user_prompt_submit: the follow-up text
+// is passed in Prompt, a terminating verdict (decision="block" /
+// continue=false / exit 2) stops the run loop, and AdditionalContext is
+// returned as a transient system message that the caller threads into
+// the follow-up turn only — never persisted.
+func (r *LocalRuntime) executeUserFollowupSubmitHooks(ctx context.Context, sess *session.Session, a *agent.Agent, prompt string, events EventSink) (stop bool, message string, contextMsgs []chat.Message) {
+	result := r.dispatchHook(ctx, a, hooks.EventUserFollowupSubmit, &hooks.Input{
+		SessionID: sess.ID,
+		Prompt:    prompt,
+	}, events)
+	if result == nil {
+		return false, "", nil
+	}
+	if !result.Allowed {
+		return true, result.Message, nil
+	}
+	return false, "", contextMessages(result)
+}
+
 // executePreCompactHooks fires pre_compact just before compaction.
 // The trigger reason ("manual", "auto", "overflow", "tool_overflow")
 // is reported in [hooks.Input.Source]. A terminating verdict skips
