@@ -33,6 +33,7 @@ type sessionClient struct {
 	promptListChangedHandler func()
 	elicitationHandler       tools.ElicitationHandler
 	samplingHandler          tools.SamplingHandler
+	samplingWithToolsHandler tools.SamplingWithToolsHandler
 	oauthSuccessHandler      func()
 	mu                       sync.RWMutex
 }
@@ -309,6 +310,40 @@ func (c *sessionClient) handleSamplingRequest(ctx context.Context, req *gomcp.Cr
 func (c *sessionClient) SetSamplingHandler(handler tools.SamplingHandler) {
 	c.mu.Lock()
 	c.samplingHandler = handler
+	c.mu.Unlock()
+}
+
+// handleSamplingWithToolsRequest forwards incoming sampling/createMessage
+// requests that may include tools to the registered handler. It is used as
+// the gomcp CreateMessageWithToolsHandler callback for both stdio and remote
+// clients when the with-tools handler is registered.
+func (c *sessionClient) handleSamplingWithToolsRequest(ctx context.Context, req *gomcp.CreateMessageWithToolsRequest) (*gomcp.CreateMessageWithToolsResult, error) {
+	slog.DebugContext(ctx, "Received sampling-with-tools request from MCP server",
+		"messages", len(req.Params.Messages),
+		"tools", len(req.Params.Tools),
+	)
+
+	c.mu.RLock()
+	handler := c.samplingWithToolsHandler
+	c.mu.RUnlock()
+
+	if handler == nil {
+		return nil, errors.New("no sampling-with-tools handler configured")
+	}
+
+	result, err := handler(ctx, req.Params)
+	if err != nil {
+		return nil, fmt.Errorf("sampling failed: %w", err)
+	}
+
+	return result, nil
+}
+
+// SetSamplingWithToolsHandler sets the handler that processes sampling
+// requests carrying a tools array from the MCP server.
+func (c *sessionClient) SetSamplingWithToolsHandler(handler tools.SamplingWithToolsHandler) {
+	c.mu.Lock()
+	c.samplingWithToolsHandler = handler
 	c.mu.Unlock()
 }
 

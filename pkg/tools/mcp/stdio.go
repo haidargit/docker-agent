@@ -43,12 +43,19 @@ func (c *stdioMCPClient) Initialize(ctx context.Context, _ *gomcp.InitializeRequ
 
 	toolChanged, promptChanged := c.notificationHandlers()
 
-	// Create client options with elicitation, sampling, and notification support
+	// Create client options with elicitation, sampling, and notification support.
+	// Sampling: prefer the with-tools handler when registered. The SDK's two
+	// CreateMessage* handlers are mutually exclusive, so populate exactly one.
 	opts := &gomcp.ClientOptions{
 		ElicitationHandler:       c.handleElicitationRequest,
-		CreateMessageHandler:     c.handleSamplingRequest,
 		ToolListChangedHandler:   toolChanged,
 		PromptListChangedHandler: promptChanged,
+	}
+	switch {
+	case c.samplingWithToolsHandler != nil:
+		opts.CreateMessageWithToolsHandler = c.handleSamplingWithToolsRequest
+	case c.samplingHandler != nil:
+		opts.CreateMessageHandler = c.handleSamplingRequest
 	}
 
 	client := gomcp.NewClient(&gomcp.Implementation{
