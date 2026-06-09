@@ -37,7 +37,7 @@ func PerformOAuthLogin(ctx context.Context, serverURL string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create resource metadata request: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(resourceReq)
+	resp, err := o.metadataClient.Do(resourceReq)
 	if err != nil {
 		return fmt.Errorf("failed to fetch protected resource metadata: %w", err)
 	}
