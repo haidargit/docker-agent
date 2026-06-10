@@ -208,6 +208,13 @@ func TestContextLimit_FromModelsDev(t *testing.T) {
 	}}
 	assert.Equal(t, int64(modelinfo.DefaultAnthropicContextLimit), unknown.contextLimit(t.Context()))
 
+	// Unknown Fable model: falls back to the family's 1M window.
+	fable := &Client{Config: base.Config{
+		ModelConfig:  latest.ModelConfig{Provider: "anthropic", Model: "claude-fable-5"},
+		ModelOptions: optionsFromStore(store),
+	}}
+	assert.Equal(t, int64(1_000_000), fable.contextLimit(t.Context()))
+
 	// No store configured: default Claude window.
 	noStore := &Client{Config: base.Config{
 		ModelConfig: latest.ModelConfig{Provider: "anthropic", Model: "claude-sonnet-4-5"},

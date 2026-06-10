@@ -157,6 +157,30 @@ func TestRejectsTokenThinking(t *testing.T) {
 	}
 }
 
+func TestDefaultClaudeContextLimit(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		model string
+		want  int64
+	}{
+		{"claude-fable-5", 1_000_000},
+		{"claude-fable-5-20260609", 1_000_000},
+		{"claude-fable", 1_000_000},
+		{"CLAUDE-FABLE-5", 1_000_000}, // case-insensitive
+		{"claude-sonnet-4-6", 200_000},
+		{"claude-opus-4-8", 200_000},
+		{"claude-fables", 200_000}, // must not match
+		{"", 200_000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, DefaultClaudeContextLimit(tc.model))
+		})
+	}
+}
+
 func TestUsesThinkingLevel(t *testing.T) {
 	t.Parallel()
 

@@ -243,10 +243,24 @@ func (mc ModelCapabilities) Supports(mimeType string) bool {
 // loadCapsTimeout is the maximum time allowed for a models.dev capability lookup.
 const loadCapsTimeout = 10 * time.Second
 
-// DefaultAnthropicContextLimit is the context window assumed for Claude models
-// when models.dev has no entry for them. Claude 3.5 through 4.x all expose a
-// 200k-token window, so it is a safe floor for clamping retries.
+// DefaultAnthropicContextLimit is the context window assumed for most Claude
+// models when models.dev has no entry for them. Claude 3.5 through 4.x all
+// expose a 200k-token window, so it is a safe floor for clamping retries.
+// Prefer [DefaultClaudeContextLimit], which special-cases newer families with
+// larger windows.
 const DefaultAnthropicContextLimit = 200000
+
+// DefaultClaudeContextLimit returns the context window assumed for a Claude
+// model when models.dev has no entry for it — typically a model released
+// before the catalogue caught up. Claude Fable models expose a 1M-token
+// window; everything else falls back to the standard 200k floor.
+func DefaultClaudeContextLimit(modelID string) int64 {
+	m := normalize(modelID)
+	if m == "claude-fable" || strings.HasPrefix(m, "claude-fable-") {
+		return 1_000_000
+	}
+	return DefaultAnthropicContextLimit
+}
 
 // ContextLimit returns the context-window size (in tokens) for a model.
 //
