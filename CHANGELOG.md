@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 
+## [v1.77.0] - 2026-06-10
+
+This release is identical to v1.76.0. It was tagged from the same commit to complete a release pipeline run and contains no code changes.
+
 ## [v1.76.0] - 2026-06-10
 
 This release adds Claude Fable 5 support, a dedicated model for session-title generation, and checksum verification for tool installs, along with session compaction and TUI fixes.
@@ -3424,3 +3428,5 @@ This release improves the terminal user interface with better error handling and
 [v1.74.0]: https://github.com/docker/docker-agent/releases/tag/v1.74.0
 
 [v1.76.0]: https://github.com/docker/docker-agent/releases/tag/v1.76.0
+
+[v1.77.0]: https://github.com/docker/docker-agent/releases/tag/v1.77.0
