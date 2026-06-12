@@ -122,7 +122,8 @@ $ docker agent run docker.io/myorg/private-agent:latest
 <div class="callout callout-info" markdown="1">
 <div class="callout-title">Docker Desktop credentials
 </div>
-  <p>When pulling or running an agent from a <code>.docker.com</code> URL (e.g. <code>hub.docker.com</code>, <code>registry-1.docker.com</code>), docker-agent automatically forwards your Docker Desktop JWT for authentication — no <code>docker login</code> required as long as Docker Desktop is running and signed in.</p>
+  <p>When pulling or running an agent from a <code>docker.com</code> or <code>*.docker.com</code> HTTPS URL (e.g. <code>desktop.docker.com</code>), docker-agent automatically forwards your Docker Desktop JWT for authentication — no explicit login required when Docker Desktop is running and signed in.</p>
+  <p>Note: <code>docker.io</code> (the standard Docker Hub registry domain) is a separate domain and is <strong>not</strong> covered by automatic JWT forwarding. Agents pulled from <code>docker.io</code> or <code>registry-1.docker.io</code> still require <code>docker login docker.io</code> for private repositories.</p>
 </div>
 
 <div class="callout callout-info" markdown="1">
