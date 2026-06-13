@@ -252,7 +252,21 @@ func (s *Server) getSession(c echo.Context) error {
 	})
 }
 
+// getSessionStatus returns the session's current runtime state. With
+// ?wait=<duration> it blocks until the session's runtime is attached (ready
+// to accept follow-ups and produce events) before responding, so a client
+// that just launched a run can wait for that exact session instead of polling.
 func (s *Server) getSessionStatus(c echo.Context) error {
+	if v := c.QueryParam("wait"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid wait: %v", err))
+		}
+		if !s.sm.WaitSessionAttached(c.Request().Context(), c.Param("id"), min(d, maxAPITimeout)) {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "session not ready within timeout")
+		}
+	}
+
 	status, err := s.sm.GetSessionStatus(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("session not found: %v", err))

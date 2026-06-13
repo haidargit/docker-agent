@@ -216,6 +216,36 @@ func (sm *SessionManager) GetSession(ctx context.Context, id string) (*session.S
 	return sess, nil
 }
 
+// WaitSessionAttached blocks until a runtime is attached for sessionID (i.e.
+// the session is ready to accept follow-ups and produce events), the timeout
+// elapses, or ctx is cancelled. It returns true once the session is attached.
+//
+// Unlike WaitReady, which fires as soon as *any* session is ready, this is
+// session-scoped: a client that launched a specific run can wait for exactly
+// that session instead of racing the server's startup.
+func (sm *SessionManager) WaitSessionAttached(ctx context.Context, sessionID string, timeout time.Duration) bool {
+	if _, ok := sm.runtimeSessions.Load(sessionID); ok {
+		return true
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			_, ok := sm.runtimeSessions.Load(sessionID)
+			return ok
+		case <-ticker.C:
+			if _, ok := sm.runtimeSessions.Load(sessionID); ok {
+				return true
+			}
+		}
+	}
+}
+
 // GetSessionStatus returns a lightweight snapshot of the session's current
 // runtime state. Designed for late-joining SSE consumers that need to know
 // the session's state without waiting for the next event transition.

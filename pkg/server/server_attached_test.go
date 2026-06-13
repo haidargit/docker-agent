@@ -626,3 +626,58 @@ func TestAttachedServer_FollowUpIdempotencyKeyDedupes(t *testing.T) {
 	defer mu.Unlock()
 	assert.Equal(t, []string{"do it"}, delivered, "the follow-up is delivered exactly once")
 }
+
+// TestAttachedServer_StatusWaitBlocksUntilAttached verifies that
+// GET /status?wait= blocks until the session's runtime is attached, then
+// returns its state.
+func TestAttachedServer_StatusWaitBlocksUntilAttached(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	store := session.NewInMemorySessionStore()
+	sess := session.New()
+	sess.Title = "Pending"
+	require.NoError(t, store.AddSession(ctx, sess))
+
+	sm := NewSessionManager(ctx, config.Sources{}, store, 0, &config.RuntimeConfig{})
+
+	srv := NewWithManager(sm, "")
+	ln, err := Listen(ctx, "127.0.0.1:0")
+	require.NoError(t, err)
+	go func() { _ = srv.Serve(ctx, ln) }()
+	addr := "http://" + ln.Addr().String()
+
+	// Attach a little later, while the request is already waiting.
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		sm.AttachRuntime(sess.ID, &fakeRuntime{}, sess)
+	}()
+
+	resp := httpDoTCP(t, ctx, http.MethodGet, addr+"/api/sessions/"+sess.ID+"/status?wait=5s", nil)
+	var status api.SessionStatusResponse
+	require.NoError(t, json.Unmarshal(resp, &status))
+	assert.Equal(t, sess.ID, status.ID)
+	assert.Equal(t, "Pending", status.Title)
+}
+
+// TestAttachedServer_StatusWaitTimesOut verifies a 503 when the session never
+// attaches within the wait window.
+func TestAttachedServer_StatusWaitTimesOut(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	sm := NewSessionManager(ctx, config.Sources{}, session.NewInMemorySessionStore(), 0, &config.RuntimeConfig{})
+
+	srv := NewWithManager(sm, "")
+	ln, err := Listen(ctx, "127.0.0.1:0")
+	require.NoError(t, err)
+	go func() { _ = srv.Serve(ctx, ln) }()
+	addr := "http://" + ln.Addr().String()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, addr+"/api/sessions/never/status?wait=100ms", http.NoBody)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+}
