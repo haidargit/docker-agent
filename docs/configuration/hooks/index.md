@@ -252,10 +252,10 @@ In addition to the common fields, each event ships its own payload:
 
 | Event                       | Extra fields                                                                                                          |
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `pre_tool_use`              | `tool_name`, `tool_use_id`, `tool_input`                                                                              |
+| `pre_tool_use`              | `agent_name`, `tool_name`, `tool_use_id`, `tool_input`                                                                |
 | `tool_response_transform`   | `tool_name`, `tool_use_id`, `tool_input`, `tool_response`                                                             |
-| `post_tool_use`             | `tool_name`, `tool_use_id`, `tool_input`, `tool_response`, `tool_error`                                               |
-| `permission_request`        | `tool_name`, `tool_use_id`, `tool_input`                                                                              |
+| `post_tool_use`             | `agent_name`, `tool_name`, `tool_use_id`, `tool_input`, `tool_response`, `tool_error`                                 |
+| `permission_request`        | `agent_name`, `tool_name`, `tool_use_id`, `tool_input`                                                                |
 | `session_start`             | `source` — one of `startup`, `resume`, `clear`, `compact`                                                             |
 | `user_prompt_submit`        | `prompt` — the text the user just submitted                                                                           |
 | `user_steering_messages_submit` | `steering_messages` — the drained steering messages, in submission order                                         |
@@ -282,6 +282,7 @@ In addition to the common fields, each event ships its own payload:
 Notes:
 
 - `tool_response` for `post_tool_use` carries the tool's result; `tool_error` is `true` when the tool failed (the failure detail is surfaced inside `tool_response`).
+- `agent_name` on `pre_tool_use`, `post_tool_use`, and `permission_request` identifies the agent that issued the tool call — in multi-agent setups this follows the active sub-agent, not always the root agent.
 - `prompt` is only populated for `user_prompt_submit`. Sub-sessions (transferred tasks, background agents, skills) do **not** fire this event because their kick-off message is synthesised by the runtime, not authored by the user.
 - `steering_messages` is only populated for `user_steering_messages_submit`. It carries the user messages the runtime just drained from the steering queue — messages submitted while the agent was already working (mid-turn, after the model stopped, or while idle before the first model call).
 - `prompt` is also populated for `user_followup_submit`, carrying the text of the dequeued follow-up message (a user message queued for end-of-turn processing via the FollowUp API / queue, as opposed to mid-turn steering).
