@@ -34,7 +34,7 @@ func TestNewLoadsAgentAndWelcomeMessage(t *testing.T) {
 func TestNewRequiresAgentSource(t *testing.T) {
 	s, err := New(t.Context(), Config{})
 	require.Nil(t, s)
-	require.EqualError(t, err, "embeddedchat: agent source is required")
+	require.ErrorIs(t, err, ErrAgentSourceRequired)
 }
 
 type fakeRuntime struct {
@@ -130,7 +130,7 @@ func TestSessionSendSurfacesConfirmationAndConfirmResumesRuntime(t *testing.T) {
 	require.True(t, event.Tool.NeedsConfirmation)
 	require.Equal(t, call, event.Tool.Call)
 
-	s.Confirm(t.Context(), dagentruntime.ResumeApproveTool("write_file(*)"))
+	require.NoError(t, s.Confirm(t.Context(), dagentruntime.ResumeApproveTool("write_file(*)")))
 	require.Len(t, rt.resumes, 1)
 	require.Equal(t, dagentruntime.ResumeTypeApproveTool, rt.resumes[0].Type)
 	require.Equal(t, "write_file(*)", rt.resumes[0].ToolName)
@@ -178,9 +178,23 @@ func TestSessionSendRejectsConcurrentRun(t *testing.T) {
 
 	out, err := s.Send(t.Context(), "second")
 	require.Nil(t, out)
-	require.EqualError(t, err, "embeddedchat: a run is already active")
+	require.ErrorIs(t, err, ErrRunActive)
 
 	cancel()
+	close(rt.events)
+}
+
+func TestSessionRejectsOperationsAfterClose(t *testing.T) {
+	rt := newFakeRuntime()
+	s := newTestSession(rt)
+
+	require.NoError(t, s.Close())
+	out, err := s.Send(t.Context(), "hi")
+	require.Nil(t, out)
+	require.ErrorIs(t, err, ErrClosed)
+	require.ErrorIs(t, s.Restart(), ErrClosed)
+	require.ErrorIs(t, s.Confirm(t.Context(), dagentruntime.ResumeApprove()), ErrClosed)
+
 	close(rt.events)
 }
 
@@ -201,6 +215,26 @@ func TestSessionCloseCancelsActiveRunAndClosesRuntime(t *testing.T) {
 	close(rt.events)
 }
 
+func TestSessionRestartKeepsRunActiveUntilRuntimeStops(t *testing.T) {
+	rt := newFakeRuntime()
+	s := newTestSession(rt)
+
+	out, err := s.Send(t.Context(), "first")
+	require.NoError(t, err)
+	require.NoError(t, s.Restart())
+
+	next, err := s.Send(t.Context(), "second")
+	require.Nil(t, next)
+	require.ErrorIs(t, err, ErrRunActive)
+
+	close(rt.events)
+	assertClosed(t, out)
+
+	next, err = s.Send(t.Context(), "second")
+	require.NoError(t, err)
+	require.True(t, receiveEvent(t, next).Done)
+}
+
 func TestSessionRestartCancelsRunAndReplacesConversation(t *testing.T) {
 	rt := newFakeRuntime()
 	s := newTestSession(rt)
@@ -209,7 +243,7 @@ func TestSessionRestartCancelsRunAndReplacesConversation(t *testing.T) {
 	require.NoError(t, err)
 	oldSession := s.session
 
-	s.Restart()
+	require.NoError(t, s.Restart())
 	require.NotSame(t, oldSession, s.session)
 	require.Empty(t, s.session.Messages)
 	require.Eventually(t, func() bool {
