@@ -89,8 +89,8 @@ for ev := range events {
     case ev.Text != "":
         response.WriteString(ev.Text)
     case ev.Tool != nil && ev.Tool.NeedsConfirmation:
-        // Approve or reject the pending tool call.
-        if err := chat.Confirm(ctx, dagentruntime.ResumeApproveSession()); err != nil {
+        // Approve the pending tool call (use ResumeApproveSession to allow all).
+        if err := chat.Confirm(ctx, dagentruntime.ResumeApprove()); err != nil {
             return err
         }
     case ev.Tool != nil && ev.Tool.Finished:
@@ -162,7 +162,7 @@ By default the RAG toolset is **opt-in**: it is only linked when you blank-impor
 
 ```go
 import (
-    _ "github.com/docker/docker-agent/pkg/rag" // register RAG toolset
+    _ "github.com/docker/docker-agent/pkg/tools/builtin/rag" // register RAG toolset
 )
 ```
 
