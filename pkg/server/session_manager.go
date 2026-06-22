@@ -414,7 +414,16 @@ var (
 // cleanly between a user message and its (excluded) follow-up. Callers
 // that need a whole-session duplicate should issue a separate request
 // targeting the index of the most recent user message.
+//
+// The read-then-write of the session store is serialised under sm.mux to
+// match the rest of the manager's mutating methods (DeleteSession,
+// RunSession, etc.). Without it, two concurrent fork requests on the
+// same parent would each see Title="foo", both compute "foo (fork 1)",
+// and produce two distinct sessions with the same auto-numbered title.
 func (sm *SessionManager) ForkSession(ctx context.Context, sessionID string, userMessageIndex int) (*session.Session, error) {
+	sm.mux.Lock()
+	defer sm.mux.Unlock()
+
 	parent, err := sm.sessionStore.GetSession(ctx, sessionID)
 	if err != nil {
 		return nil, err

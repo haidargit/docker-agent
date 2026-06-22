@@ -172,6 +172,14 @@ func copySessionMetadata(dst, src *Session, title string) {
 	dst.WorkingDir = src.WorkingDir
 	dst.SendUserMessage = src.SendUserMessage
 	dst.MaxIterations = src.MaxIterations
+	// MaxConsecutiveToolCalls and MaxOldToolCallTokens are safety / context
+	// rails that may be configured deliberately by the user or operator
+	// (consecutive-tool-call cutoff, old-tool-call truncation budget).
+	// Dropping them on a fork or branch would silently make the new
+	// session behave differently from its parent. Clone() preserves both,
+	// so do the same here.
+	dst.MaxConsecutiveToolCalls = src.MaxConsecutiveToolCalls
+	dst.MaxOldToolCallTokens = src.MaxOldToolCallTokens
 	dst.Starred = src.Starred
 	dst.Permissions = clonePermissionsConfig(src.Permissions)
 	dst.AgentModelOverrides = cloneStringMap(src.AgentModelOverrides)
