@@ -2215,7 +2215,7 @@ func TestRoundTrip_ServerInvalidToken_RefreshFails_DefersWhenNonInteractive(t *t
 
 	// Stale token must have been evicted.
 	_, storeErr := transport.tokenStore.GetToken(srv.URL)
-	assert.Error(t, storeErr, "stale token must be evicted from the store")
+	require.Error(t, storeErr, "stale token must be evicted from the store")
 
 	// The token endpoint was hit at most once (backoff not yet active).
 	assert.Equal(t, int32(1), tokenCalls.Load())
@@ -2264,7 +2264,7 @@ func TestRoundTrip_ServerInvalidToken_NoRefreshToken_NonInteractive(t *testing.T
 		AccessToken: "old-at",
 		TokenType:   "Bearer",
 		// No RefreshToken → refresh path must not be attempted.
-		ExpiresAt: time.Now().Add(time.Hour),
+		ExpiresAt:  time.Now().Add(time.Hour),
 		AuthServer: srv.URL,
 	})
 	require.NoError(t, err)
@@ -2352,7 +2352,7 @@ func TestRoundTrip_ConcurrentInvalidToken_RefreshesOnce(t *testing.T) {
 	for range n {
 		select {
 		case err := <-results:
-			assert.NoError(t, err, "all concurrent requests must eventually succeed")
+			require.NoError(t, err, "all concurrent requests must eventually succeed")
 		case <-time.After(10 * time.Second):
 			t.Fatal("timeout waiting for concurrent round-trips")
 		}

@@ -1233,6 +1233,99 @@ func TestEmitStartupInfo_DeferredAuthDoesNotConsumeFailureGate(t *testing.T) {
 			"and the user sees zero tools with no explanation")
 }
 
+// recoveryAuthToolSet simulates a toolset whose first Start() always succeeds,
+// and whose Restart() returns a configurable error (used to simulate a
+// background invalid_token loss after a prior successful start).
+// IsStarted() reflects live connection state so StartableToolSet.Start() can
+// detect the "inner went dead" recovery scenario.
+type recoveryAuthToolSet struct {
+	started    bool
+	restartErr error
+}
+
+func (r *recoveryAuthToolSet) Tools(context.Context) ([]tools.Tool, error) { return nil, nil }
+func (r *recoveryAuthToolSet) Start(context.Context) error                 { r.started = true; return nil }
+func (r *recoveryAuthToolSet) Stop(context.Context) error                  { r.started = false; return nil }
+func (r *recoveryAuthToolSet) IsStarted() bool                             { return r.started }
+func (r *recoveryAuthToolSet) Restart(context.Context) error               { return r.restartErr }
+
+// TestEmitStartupInfo_RecoveryAuthNoticeEmittedOnce is the regression test for
+// blocking issue 3: when a toolset was previously started and working but the
+// background watcher detected a server-side invalid_token, the next call to
+// emitToolsProgressively must attempt a recovery Start() and emit exactly one
+// targeted re-auth notice. Initial-startup auth deferral (toolset never worked
+// before) must remain silent. The streak resets on success so a subsequent
+// background failure produces a fresh notice.
+func TestEmitStartupInfo_RecoveryAuthNoticeEmittedOnce(t *testing.T) {
+	prov := &mockProvider{id: "test/startup-model", stream: &mockStream{}}
+	authErr := &mcptools.AuthorizationRequiredError{URL: "https://example.test/mcp"}
+
+	inner := &recoveryAuthToolSet{restartErr: authErr}
+	root := agent.New("root", "agent",
+		agent.WithModel(prov),
+		agent.WithToolSets(inner),
+	)
+	tm := team.New(team.WithAgents(root))
+	rt, err := NewLocalRuntime(tm, WithCurrentAgent("root"), WithModelStore(mockModelStore{}))
+	require.NoError(t, err)
+
+	var wrapped *tools.StartableToolSet
+	for _, ts := range root.ToolSets() {
+		if s, ok := ts.(*tools.StartableToolSet); ok {
+			wrapped = s
+			break
+		}
+	}
+	require.NotNil(t, wrapped, "agent.ToolSets() must wrap the inner toolset in a *tools.StartableToolSet")
+
+	// nopSend discards sidebar events; we inspect agent.DrainWarnings() instead.
+	nopSend := func(Event) bool { return true }
+	// Mirror EmitStartupInfo\'s non-interactive context so toolsets with OAuth
+	// fail fast rather than blocking on a prompt.
+	ctx := mcptools.WithoutInteractivePrompts(t.Context())
+
+	// Phase 1: initial startup — inner.Start() succeeds (first call); no recovery
+	// notice because the toolset was never previously working.
+	rt.emitToolsProgressively(ctx, root, nopSend)
+	_ = root.DrainWarnings() // clear any unrelated warnings
+	require.True(t, wrapped.IsStarted(), "toolset must be started after initial success")
+
+	// Phase 2: background failure — inner loses its connection (e.g. server-side
+	// invalid_token eviction set the live started flag to false).
+	inner.started = false
+
+	// First emitToolsProgressively after the background failure: recovery Start()
+	// is attempted (Restart returns authErr), and exactly one targeted notice is
+	// added to the agent\'s warning queue.
+	rt.emitToolsProgressively(ctx, root, nopSend)
+	noticesPhase2 := root.DrainWarnings()
+	require.Len(t, noticesPhase2, 1,
+		"exactly one targeted re-auth notice must be emitted on the first recovery failure")
+	assert.Contains(t, noticesPhase2[0], "needs re-authentication",
+		"recovery notice must use the targeted re-auth framing, not the generic start-failed message")
+
+	// Dedup: ShouldReportRecoveryFailure was consumed by emitToolsProgressively;
+	// a direct call must return false (streak is still active but pending cleared).
+	assert.False(t, wrapped.ShouldReportRecoveryFailure(),
+		"ShouldReportRecoveryFailure must return false after the first notice was emitted (dedup)")
+
+	// Phase 3: inner recovers — successful Start() (via inner.Start() since
+	// wrapped.started==false after failed Restart) resets the recovery streak.
+	inner.started = true
+	rt.emitToolsProgressively(ctx, root, nopSend)
+	_ = root.DrainWarnings()
+	require.True(t, wrapped.IsStarted(), "toolset must be re-started after recovery")
+	assert.False(t, wrapped.ShouldReportRecoveryFailure(),
+		"recovery streak must be reset after a successful Start")
+
+	// Phase 4: background failure again — streak was reset, so a fresh notice
+	// is expected (verifies reset-on-success behavior).
+	inner.started = false
+	rt.emitToolsProgressively(ctx, root, nopSend)
+	noticesPhase4 := root.DrainWarnings()
+	require.Len(t, noticesPhase4, 1, "fresh failure after streak reset must emit a new notice")
+}
+
 // TestEmitAgentWarnings_OnlyEmitsFailures verifies that emitAgentWarnings
 // only surfaces real failures to the user. Recovery is intentionally
 // silent: a previously-failed toolset becoming available again does NOT

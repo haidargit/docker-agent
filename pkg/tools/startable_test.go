@@ -321,3 +321,139 @@ func TestStartableToolSet_NoStartReporterPreservesLatchedStart(t *testing.T) {
 	assert.NilError(t, s.Start(t.Context()))
 	assert.Check(t, is.Equal(inner.startups, 1))
 }
+
+// recoveryFailingToolSet simulates a toolset that starts successfully on
+// the first attempt (Start) and then fails on every Restart call,
+// representing a toolset that was working but became unavailable.
+type recoveryFailingToolSet struct {
+	started    bool
+	restartErr error
+}
+
+func (r *recoveryFailingToolSet) Tools(context.Context) ([]tools.Tool, error) { return nil, nil }
+func (r *recoveryFailingToolSet) IsStarted() bool                             { return r.started }
+func (r *recoveryFailingToolSet) Start(context.Context) error {
+	r.started = true
+	return nil
+}
+func (r *recoveryFailingToolSet) Restart(_ context.Context) error { return r.restartErr }
+func (r *recoveryFailingToolSet) Stop(_ context.Context) error {
+	r.started = false
+	return nil
+}
+
+// TestStartableToolSet_ShouldReportRecoveryFailure_OncePerStreak verifies
+// that ShouldReportRecoveryFailure returns true exactly once when a
+// previously-started toolset fails to recover (recovering=true path), and
+// is silent for subsequent calls in the same streak.
+func TestStartableToolSet_ShouldReportRecoveryFailure_OncePerStreak(t *testing.T) {
+	t.Parallel()
+
+	authErr := errors.New("authentication required")
+	inner := &recoveryFailingToolSet{restartErr: authErr}
+	s := tools.NewStartable(inner)
+
+	// First Start: succeeds and marks the toolset as started.
+	assert.NilError(t, s.Start(t.Context()))
+	assert.Check(t, is.Equal(s.ShouldReportRecoveryFailure(), false), "no recovery failure yet")
+
+	// Simulate the inner toolset going down (e.g. background reconnect failed).
+	inner.started = false
+
+	// Recovery attempt 1: Restart fails → streak begins.
+	assert.Check(t, s.Start(t.Context()) != nil, "expected error on recovery")
+	assert.Check(t, is.Equal(s.ShouldReportRecoveryFailure(), true), "first recovery failure must be reported")
+	assert.Check(t, is.Equal(s.ShouldReportRecoveryFailure(), false), "second call in same streak must be false")
+}
+
+// TestStartableToolSet_ShouldReportRecoveryFailure_NotFiredForInitialStartup
+// verifies that ShouldReportRecoveryFailure is NOT triggered for initial-
+// startup failures (toolset was never started before). Only recovery
+// failures (toolset was working, then failed) should trigger the notice.
+func TestStartableToolSet_ShouldReportRecoveryFailure_NotFiredForInitialStartup(t *testing.T) {
+	t.Parallel()
+
+	errBoom := errors.New("startup error")
+	f := &flappyToolSet{errs: []error{errBoom, errBoom}}
+	s := tools.NewStartable(f)
+
+	// Turn 1: initial startup failure (never started before).
+	assert.Check(t, s.Start(t.Context()) != nil)
+	assert.Check(t, is.Equal(s.ShouldReportRecoveryFailure(), false),
+		"initial-startup failure must NOT trigger recovery notice")
+
+	// Turn 2: second startup failure.
+	assert.Check(t, s.Start(t.Context()) != nil)
+	assert.Check(t, is.Equal(s.ShouldReportRecoveryFailure(), false),
+		"repeated initial-startup failure must NOT trigger recovery notice")
+}
+
+// TestStartableToolSet_ShouldReportRecoveryFailure_ResetsOnSuccess verifies
+// that a successful recovery clears the streak so a future failure is
+// reported as fresh.
+func TestStartableToolSet_ShouldReportRecoveryFailure_ResetsOnSuccess(t *testing.T) {
+	t.Parallel()
+
+	authErr := errors.New("authentication required")
+	inner := &recoveryFailingToolSet{restartErr: authErr}
+	s := tools.NewStartable(inner)
+
+	// Initial start succeeds (Start always returns nil for recoveryFailingToolSet).
+	assert.NilError(t, s.Start(t.Context()))
+	assert.Check(t, is.Equal(s.IsStarted(), true))
+	assert.Check(t, is.Equal(s.ShouldReportRecoveryFailure(), false), "no recovery failure yet")
+
+	// Background failure: inner loses its connection.
+	inner.started = false
+
+	// Recovery fails: Restart returns authErr.
+	err := s.Start(t.Context())
+	assert.Check(t, err != nil, "expected error on recovery failure")
+	assert.Check(t, is.Equal(s.ShouldReportRecoveryFailure(), true), "first recovery failure must be reported")
+	assert.Check(t, is.Equal(s.ShouldReportRecoveryFailure(), false), "second call in same streak must return false (dedup)")
+
+	// Successful recovery: clear the error so the next Start goes through and
+	// resets the streak. Because s.started==false after the failed Restart,
+	// Start takes the non-recovery path (inner.Start), which succeeds.
+	inner.restartErr = nil
+	assert.NilError(t, s.Start(t.Context()), "recovery with nil restartErr must succeed")
+	assert.Check(t, is.Equal(s.IsStarted(), true))
+	assert.Check(t, is.Equal(s.ShouldReportRecoveryFailure(), false),
+		"after successful recovery, the streak must be reset")
+
+	// A subsequent background failure after the reset is a fresh streak.
+	inner.restartErr = authErr
+	inner.started = false
+	_ = s.Start(t.Context())
+	assert.Check(t, is.Equal(s.ShouldReportRecoveryFailure(), true),
+		"fresh failure after streak reset must be reported")
+}
+
+// TestStartableToolSet_ShouldReportRecoveryFailure_ResetsOnStop verifies
+// that Stop clears the recovery streak.
+func TestStartableToolSet_ShouldReportRecoveryFailure_ResetsOnStop(t *testing.T) {
+	t.Parallel()
+
+	authErr := errors.New("authentication required")
+	inner := &recoveryFailingToolSet{restartErr: authErr}
+	s := tools.NewStartable(inner)
+
+	// Initial start → recovery failure → consume the once-report.
+	assert.NilError(t, s.Start(t.Context()))
+	inner.started = false
+	assert.Check(t, s.Start(t.Context()) != nil)
+	assert.Check(t, is.Equal(s.ShouldReportRecoveryFailure(), true), "must report once")
+
+	// Stop resets all streaks.
+	assert.NilError(t, s.Stop(t.Context()))
+
+	// A new recovery cycle after Stop must report again.
+	inner.started = false // inner Stop set it false, but simulate inner starting first
+	inner.restartErr = nil
+	assert.NilError(t, s.Start(t.Context())) // inner Start succeeds (restartErr cleared)
+	inner.started = false
+	inner.restartErr = authErr
+
+	assert.Check(t, s.Start(t.Context()) != nil)
+	assert.Check(t, is.Equal(s.ShouldReportRecoveryFailure(), true), "fresh recovery after Stop must report again")
+}

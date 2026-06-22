@@ -15,6 +15,7 @@ import (
 	"github.com/docker/docker-agent/pkg/config/types"
 	"github.com/docker/docker-agent/pkg/model/provider"
 	"github.com/docker/docker-agent/pkg/tools"
+	mcptools "github.com/docker/docker-agent/pkg/tools/mcp"
 )
 
 // Agent represents an AI agent
@@ -409,6 +410,18 @@ func (a *Agent) ensureToolSetsAreStarted(ctx context.Context) {
 			continue
 		}
 		desc := tools.DescribeToolSet(toolSet)
+		if mcptools.IsAuthorizationRequired(err) {
+			// Recovery: previously-working toolset lost its OAuth token in the
+			// background. Emit the targeted re-auth notice once per streak so the
+			// user knows a dialog will appear on their next message.
+			// Initial-startup auth deferral (ShouldReportRecoveryFailure==false)
+			// stays silent — the dialog appears naturally on the first turn.
+			if toolSet.ShouldReportRecoveryFailure() {
+				slog.WarnContext(ctx, "Toolset needs re-authentication after background token rejection", "agent", a.Name(), "toolset", desc)
+				a.AddToolWarning(desc + " needs re-authentication — it will prompt on your next message, or use /toolset-restart")
+			}
+			continue
+		}
 		if toolSet.ShouldReportFailure() {
 			slog.WarnContext(ctx, "Toolset start failed; will retry on next turn", "agent", a.Name(), "toolset", desc, "error", err)
 			a.AddToolWarning(fmt.Sprintf("%s start failed: %v", desc, err))

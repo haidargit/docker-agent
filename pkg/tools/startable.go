@@ -89,6 +89,12 @@ type StartableToolSet struct {
 	started     bool
 	startStreak failureStreak // Start() failures
 	listStreak  failureStreak // Tools() listing failures
+	// recoveryStreak tracks once-per-streak notices specifically for
+	// recovery failures (the toolset was previously started and working,
+	// then Start failed again). Distinct from startStreak so callers can
+	// emit a different, more targeted message (e.g. "needs re-auth" vs
+	// "start failed") for the recovery case.
+	recoveryStreak failureStreak
 }
 
 // NewStartable wraps a ToolSet for lazy initialization.
@@ -152,6 +158,7 @@ func (s *StartableToolSet) Start(ctx context.Context) (err error) {
 		}()
 		if err := restarter.Restart(ctx); err != nil {
 			s.startStreak.fail()
+			s.recoveryStreak.fail()
 			return err
 		}
 	} else if startable, ok := As[Startable](s.ToolSet); ok {
@@ -178,6 +185,7 @@ func (s *StartableToolSet) Start(ctx context.Context) (err error) {
 	// as fresh. This is the recovery path — it is intentionally silent.
 	s.started = true
 	s.startStreak.reset()
+	s.recoveryStreak.reset()
 	return nil
 }
 
@@ -208,6 +216,7 @@ func (s *StartableToolSet) Stop(ctx context.Context) error {
 	s.started = false
 	s.startStreak.reset()
 	s.listStreak.reset()
+	s.recoveryStreak.reset()
 	if startable, ok := As[Startable](s.ToolSet); ok {
 		return startable.Stop(ctx)
 	}
@@ -232,6 +241,22 @@ func (s *StartableToolSet) ShouldReportListFailure() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.listStreak.shouldReport()
+}
+
+// ShouldReportRecoveryFailure returns true exactly once per recovery-failure
+// streak — when a toolset that was previously started and working fails to
+// restart (e.g. because the server revoked the OAuth token in the background).
+//
+// Unlike ShouldReportFailure (which fires for both initial and recovery
+// failures), this method fires only for recovery failures so callers can
+// emit a targeted "needs re-authentication" notice instead of a generic
+// "start failed" one. Returns false for initial-startup auth deferral
+// (those are silent pending prompts and the dialog appears naturally on
+// the first interactive turn).
+func (s *StartableToolSet) ShouldReportRecoveryFailure() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.recoveryStreak.shouldReport()
 }
 
 // Unwrap returns the underlying ToolSet.

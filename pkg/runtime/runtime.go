@@ -1243,41 +1243,53 @@ func (r *LocalRuntime) emitToolsProgressively(ctx context.Context, a *agent.Agen
 
 		isLast := i == totalToolsets-1
 
-		// Start the toolset if needed
+		// Start the toolset if needed, including recovery: a previously-started
+		// toolset whose inner connection died (e.g. background invalid_token)
+		// must have its recovery Start() called here so ShouldReportRecoveryFailure
+		// can fire the targeted re-auth notice. Start() is a no-op when the
+		// toolset is already healthy, so calling it unconditionally is safe.
 		if startable, ok := toolset.(*tools.StartableToolSet); ok {
-			if !startable.IsStarted() {
-				if err := startable.Start(ctx); err != nil {
-					desc := tools.DescribeToolSet(startable.ToolSet)
-					// IsAuthorizationRequired must be checked BEFORE
-					// ShouldReportFailure: this is the first — expected —
-					// failure of a deferred-OAuth toolset, and consuming the
-					// failure-reported flag here would suppress the *real*
-					// failure (e.g. server 4xx on the eventual interactive
-					// retry) that the user actually needs to see.
-					if mcptools.IsAuthorizationRequired(err) {
-						// The toolset just needs an OAuth approval that we
-						// deliberately deferred until the user is interacting
-						// with the agent. The dialog will appear naturally on
-						// the first RunStream — no need to pre-announce it.
+			if err := startable.Start(ctx); err != nil {
+				desc := tools.DescribeToolSet(startable.ToolSet)
+				// IsAuthorizationRequired must be checked BEFORE
+				// ShouldReportFailure: this is the first — expected —
+				// failure of a deferred-OAuth toolset, and consuming the
+				// failure-reported flag here would suppress the *real*
+				// failure (e.g. server 4xx on the eventual interactive
+				// retry) that the user actually needs to see.
+				if mcptools.IsAuthorizationRequired(err) {
+					// Two cases:
+					// 1. Initial startup deferral (toolset never ran): the
+					//    OAuth dialog will appear naturally on the first user
+					//    message — no need to pre-announce it.
+					// 2. Recovery: the toolset was previously working but the
+					//    background watcher detected a server-side invalid_token
+					//    (fixes #3198). Surface a deduped re-auth notice so the
+					//    user knows what is about to prompt on their next message.
+					if startable.ShouldReportRecoveryFailure() {
+						slog.WarnContext(ctx, "Toolset needs re-authentication after background token rejection",
+							"agent", a.Name(), "toolset", desc)
+						a.AddToolWarning(desc + " needs re-authentication — it will prompt on your next message, or use /toolset-restart")
+					} else {
 						slog.DebugContext(ctx, "Toolset deferred until first message", "agent", a.Name(), "toolset", desc, "reason", err)
-						continue
 					}
-					// Route real failures through the agent's warning
-					// channel so the TUI surfaces a persistent,
-					// user-visible notice that includes the actual
-					// server-side cause (threaded through by
-					// remoteMCPClient.Initialize). Use the same
-					// once-per-streak guard as ensureToolSetsAreStarted
-					// so a failing toolset doesn't flood the UI with a
-					// new warning every time the agent is restarted.
-					if !startable.ShouldReportFailure() {
-						slog.DebugContext(ctx, "Toolset still unavailable; skipping", "agent", a.Name(), "toolset", desc, "error", err)
-						continue
-					}
-					slog.WarnContext(ctx, "Toolset start failed; skipping", "agent", a.Name(), "toolset", desc, "error", err)
-					a.AddToolWarning(fmt.Sprintf("%s start failed: %v", desc, err))
 					continue
 				}
+				// Route real failures through the agent's warning
+				// channel so the TUI surfaces a persistent,
+				// user-visible notice that includes the actual
+				// server-side cause (threaded through by
+				// remoteMCPClient.Initialize). Use the same
+				// once-per-streak guard as ensureToolSetsAreStarted
+				// so a failing toolset doesn't flood the UI with a
+				// new warning every time the agent is restarted.
+				if !startable.ShouldReportFailure() {
+					slog.DebugContext(ctx, "Toolset still unavailable; skipping", "agent", a.Name(), "toolset", desc, "error", err)
+					continue
+				}
+				slog.WarnContext(ctx, "Toolset start failed; skipping", "agent", a.Name(), "toolset", desc, "error", err)
+				a.AddToolWarning(fmt.Sprintf("%s start failed: %v", desc, err))
+				continue
 			}
 		}
 
