@@ -33,9 +33,11 @@ func (t *Config) Validate() error {
 		}
 	}
 
-	// Validate reusable, named toolset definitions even when no agent
-	// references them (parity with the top-level MCP/skill definition
-	// validation).
+	// Re-validate reusable, named toolset definitions here so they are
+	// checked even when no agent references them, and when a Config is
+	// constructed programmatically rather than parsed from YAML. (When
+	// parsed, each value is already validated by Toolset.UnmarshalYAML.)
+	// Mirrors the agent-toolset validation loop below.
 	for name := range t.Toolsets {
 		ts := t.Toolsets[name]
 		if err := ts.validate(); err != nil {
