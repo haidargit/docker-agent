@@ -73,6 +73,38 @@ func TestNormalizeOTLPEndpoint(t *testing.T) {
 	}
 }
 
+// TestSignalEndpointURL pins the base-endpoint -> per-signal URL mapping.
+// docker-agent re-injects the configured endpoint through WithEndpointURL,
+// which takes the path verbatim; signalEndpointURL restores the signal
+// subpath the OTel SDK would otherwise append, so base-path backends such
+// as Langfuse and LangSmith receive traces at <base>/v1/traces instead of
+// 404ing on the bare base URL.
+func TestSignalEndpointURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		endpoint   string
+		signalPath string
+		want       string
+	}{
+		{"langfuse base appends traces", "https://cloud.langfuse.com/api/public/otel", "/v1/traces", "https://cloud.langfuse.com/api/public/otel/v1/traces"},
+		{"langsmith base appends traces", "https://api.smith.langchain.com/otel", "/v1/traces", "https://api.smith.langchain.com/otel/v1/traces"},
+		{"full per-signal url preserved", "https://api.smith.langchain.com/otel/v1/traces", "/v1/traces", "https://api.smith.langchain.com/otel/v1/traces"},
+		{"trailing slash base joins single slash", "https://cloud.langfuse.com/api/public/otel/", "/v1/logs", "https://cloud.langfuse.com/api/public/otel/v1/logs"},
+		{"bare localhost host:port -> http + traces", "localhost:4318", "/v1/traces", "http://localhost:4318/v1/traces"},
+		{"bare remote host:port -> https + metrics", "collector.example.com:4318", "/v1/metrics", "https://collector.example.com:4318/v1/metrics"},
+		{"root-only endpoint appends traces", "https://collector.example.com", "/v1/traces", "https://collector.example.com/v1/traces"},
+		{"explicit http preserved + logs", "http://localhost:4318", "/v1/logs", "http://localhost:4318/v1/logs"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, signalEndpointURL(tt.endpoint, tt.signalPath))
+		})
+	}
+}
+
 func TestIsLocalhostEndpoint(t *testing.T) {
 	t.Parallel()
 

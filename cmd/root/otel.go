@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
+	"path"
 	"runtime"
 	"strings"
 	"time"
@@ -158,19 +160,12 @@ func newLoggerProvider(ctx context.Context, res *resource.Resource, endpoint str
 }
 
 // normalizeOTLPEndpoint turns a possibly-bare `host:port` into a fully
-// scheme-qualified URL so all three OTLP/HTTP exporters can be wired via
-// `WithEndpointURL` consistently. We can't rely on the SDKs' default
-// scheme inference: `otlptracehttp` (older API) treats a bare endpoint
-// as TLS-by-default while `otlploghttp` (newer API) treats the same
-// bare endpoint as insecure-by-default. With `OTEL_EXPORTER_OTLP_CERTIFICATE`
-// set in the env, the log exporter then errors out with
-// `insecure HTTP endpoint cannot use TLS client configuration`,
-// `initOTelSDK` propagates the failure, and the entire telemetry
-// pipeline (including traces) is torn down.
-//
-// Pinning the scheme up front removes that asymmetry: localhost gets
-// `http://`, every other host gets `https://`, and any explicit scheme
-// the caller already supplied is honoured verbatim.
+// scheme-qualified URL so it can be fed to `WithEndpointURL`. This is
+// required because `url.Parse("host:port")` parses `host` as the URL
+// scheme and leaves `Host` empty, which produces a broken exporter.
+// Pinning the scheme up front makes the value parse correctly: localhost
+// gets `http://`, every other host gets `https://`, and any explicit
+// scheme the caller already supplied is honoured verbatim.
 func normalizeOTLPEndpoint(endpoint string) string {
 	if strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
 		return endpoint
@@ -181,16 +176,46 @@ func normalizeOTLPEndpoint(endpoint string) string {
 	return "https://" + endpoint
 }
 
+// signalEndpointURL scheme-qualifies the configured base endpoint and
+// appends the OTLP signal subpath (`/v1/traces`, `/v1/metrics`,
+// `/v1/logs`), mirroring what the OTel SDK does when it reads
+// `OTEL_EXPORTER_OTLP_ENDPOINT` natively (`path.Join(u.Path, signalPath)`).
+//
+// We have to reproduce that append ourselves: docker-agent reads the
+// endpoint from the environment and re-injects it through
+// `WithEndpointURL`, which takes the URL path verbatim and only falls back
+// to the signal subpath when the path is empty. Without the append,
+// base-path backends silently break — Langfuse (`/api/public/otel`) and
+// LangSmith (`/otel`) expect traces at `<base>/v1/traces`, and a bare
+// collector endpoint would post logs to `/`.
+//
+// A base URL that already ends in the requested signal subpath is returned
+// unchanged so a caller that passes a full per-signal URL is not
+// double-suffixed.
+func signalEndpointURL(endpoint, signalPath string) string {
+	normalized := normalizeOTLPEndpoint(endpoint)
+	u, err := url.Parse(normalized)
+	if err != nil {
+		// Let the exporter surface the parse error against the raw value.
+		return normalized
+	}
+	if strings.HasSuffix(strings.TrimRight(u.Path, "/"), signalPath) {
+		return normalized
+	}
+	u.Path = path.Join(u.Path, signalPath)
+	return u.String()
+}
+
 func traceExporterOptions(endpoint string) []otlptracehttp.Option {
-	return []otlptracehttp.Option{otlptracehttp.WithEndpointURL(normalizeOTLPEndpoint(endpoint))}
+	return []otlptracehttp.Option{otlptracehttp.WithEndpointURL(signalEndpointURL(endpoint, "/v1/traces"))}
 }
 
 func metricExporterOptions(endpoint string) []otlpmetrichttp.Option {
-	return []otlpmetrichttp.Option{otlpmetrichttp.WithEndpointURL(normalizeOTLPEndpoint(endpoint))}
+	return []otlpmetrichttp.Option{otlpmetrichttp.WithEndpointURL(signalEndpointURL(endpoint, "/v1/metrics"))}
 }
 
 func logExporterOptions(endpoint string) []otlploghttp.Option {
-	return []otlploghttp.Option{otlploghttp.WithEndpointURL(normalizeOTLPEndpoint(endpoint))}
+	return []otlploghttp.Option{otlploghttp.WithEndpointURL(signalEndpointURL(endpoint, "/v1/logs"))}
 }
 
 func shutdownTracerProvider(tp *trace.TracerProvider) error {
