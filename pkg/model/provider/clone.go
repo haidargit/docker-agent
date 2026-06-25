@@ -58,7 +58,19 @@ func mergeCloneOptions(cfg base.Config, opts []options.Opt) (latest.ModelConfig,
 		modelConfig.MaxTokens = &mt
 	}
 	if merged.NoThinking() {
-		modelConfig.ThinkingBudget = nil
+		// Use the explicit "disabled" sentinel (`thinking_budget: none`) instead
+		// of nil so that the downstream applyProviderDefaults → mergeFromProviderConfig
+		// pass cannot revive a provider-level thinking_budget via its
+		// setIfNil(&dst.ThinkingBudget, src.ThinkingBudget) merge. applyModelDefaults
+		// normalises this sentinel back to nil before the provider client sees the
+		// config, so the on-the-wire behaviour matches "thinking is off".
+		//
+		// Without this, calling CloneWithOptions(..., WithNoThinking()) on a model
+		// served by a custom provider that sets thinking_budget at the provider
+		// level (e.g. Gordon's anthropic provider) silently inherits that budget
+		// — turning short-budget callers like session-title generation into hard
+		// failures (max_tokens vs thinking_budget validation).
+		modelConfig.ThinkingBudget = &latest.ThinkingBudget{Effort: "none"}
 	}
 	return modelConfig, mergedOpts
 }

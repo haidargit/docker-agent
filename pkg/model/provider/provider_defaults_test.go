@@ -414,3 +414,36 @@ func TestApplyProviderDefaults_AliasFallback(t *testing.T) {
 	assert.Empty(t, cfg.BaseURL)
 	assert.Empty(t, cfg.TokenKey)
 }
+
+// TestApplyProviderDefaults_NoThinkingSentinelBlocksProviderBudget is the
+// regression test for the title-generation failure caused by a clone calling
+// WithNoThinking on a model whose custom provider sets thinking_budget at the
+// provider level (e.g. Gordon's anthropic provider).
+//
+// CloneWithOptions writes the disabled sentinel (Effort: "none") on the
+// cloned ModelConfig so the subsequent applyProviderDefaults pass cannot
+// revive the provider-level budget via mergeFromProviderConfig's
+// setIfNil(&dst.ThinkingBudget, src.ThinkingBudget) merge. applyModelDefaults
+// then normalises the sentinel back to nil. End result: thinking really is
+// off when WithNoThinking is set, no matter where thinking_budget was
+// declared in the user's config.
+func TestApplyProviderDefaults_NoThinkingSentinelBlocksProviderBudget(t *testing.T) {
+	t.Parallel()
+
+	cfg := &latest.ModelConfig{
+		Provider:       "anthropic",
+		Model:          "claude-haiku-4-5-20251001",
+		ThinkingBudget: &latest.ThinkingBudget{Effort: "none"}, // sentinel written by CloneWithOptions(WithNoThinking)
+	}
+	customProviders := map[string]latest.ProviderConfig{
+		"anthropic": {
+			Provider:       "anthropic",
+			ThinkingBudget: &latest.ThinkingBudget{Tokens: 5000},
+		},
+	}
+
+	got := applyProviderDefaults(cfg, customProviders)
+
+	assert.Nil(t, got.ThinkingBudget,
+		"WithNoThinking sentinel must survive mergeFromProviderConfig and be normalised to nil by applyModelDefaults")
+}

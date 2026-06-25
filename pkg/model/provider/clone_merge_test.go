@@ -52,8 +52,14 @@ func TestMergeCloneOptions_MaxTokensOverride(t *testing.T) {
 	assert.Len(t, mergedOpts, 1, "user-supplied option should appear in mergedOpts")
 }
 
-// TestMergeCloneOptions_NoThinking covers the previously-uncovered branch in
-// the option-merge loop that nils out ThinkingBudget when WithNoThinking is set.
+// TestMergeCloneOptions_NoThinking covers the option-merge branch that
+// disables thinking when WithNoThinking is set.
+//
+// The clone records "disabled" as an explicit sentinel (Effort: "none") rather
+// than nil so the subsequent applyProviderDefaults pass cannot revive a
+// provider-level thinking_budget via its setIfNil merge. applyModelDefaults
+// normalises this sentinel back to nil before the provider client sees the
+// config, so the wire-level behaviour is identical to a real nil.
 func TestMergeCloneOptions_NoThinking(t *testing.T) {
 	t.Parallel()
 
@@ -67,7 +73,9 @@ func TestMergeCloneOptions_NoThinking(t *testing.T) {
 
 	got, _ := mergeCloneOptions(cfg, []options.Opt{options.WithNoThinking()})
 
-	assert.Nil(t, got.ThinkingBudget, "WithNoThinking must clear ThinkingBudget")
+	require.NotNil(t, got.ThinkingBudget, "WithNoThinking must write the disabled sentinel, not nil")
+	assert.True(t, got.ThinkingBudget.IsDisabled(),
+		"WithNoThinking must write a sentinel that IsDisabled() recognises so applyModelDefaults normalises it back to nil")
 }
 
 func TestMergeCloneOptions_PreservesBaseOptions(t *testing.T) {
