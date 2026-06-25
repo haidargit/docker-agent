@@ -404,6 +404,7 @@ func (m *model) finishTool(e *runtime.ToolCallResponseEvent) {
 	if strings.TrimSpace(tv.output) == "" {
 		tv.output = e.Response
 	}
+	tv.images = inlineImagesFromToolResult(e.Result)
 	tv.elapsed = time.Since(m.toolStart[id])
 
 	view := *tv

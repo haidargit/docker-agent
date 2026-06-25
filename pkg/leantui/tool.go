@@ -15,6 +15,7 @@ type toolView struct {
 	command     string // shell command, when the tool runs one
 	argsSummary string // compact argument summary for non-shell tools
 	output      string
+	images      []inlineImage
 	done        bool
 	isError     bool
 	elapsed     time.Duration
@@ -50,6 +51,9 @@ func renderTool(t toolView, width int) []string {
 
 	if strings.TrimSpace(t.output) != "" {
 		out = append(out, renderToolOutput(t.output, width)...)
+	}
+	for _, img := range t.images {
+		out = append(out, renderInlineImage(img, width)...)
 	}
 
 	if t.done {
