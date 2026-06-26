@@ -701,6 +701,56 @@ func TestFileKeyringBackedStore_PersistsAcrossReload(t *testing.T) {
 	}
 }
 
+// TestFileKeyringPassphrase_RandomAndPersistent verifies the file-keyring
+// passphrase is generated randomly on first use, persisted with owner-only
+// permissions, and reused on subsequent calls — so it is unique per install
+// rather than a hardcoded constant baked into the binary.
+func TestFileKeyringPassphrase_RandomAndPersistent(t *testing.T) {
+	dirA := filepath.Join(t.TempDir(), fallbackKeyringDir)
+	if err := ensurePrivateDir(dirA); err != nil {
+		t.Fatalf("ensurePrivateDir: %v", err)
+	}
+
+	first, err := fileKeyringPassphrase(dirA)
+	if err != nil {
+		t.Fatalf("fileKeyringPassphrase: %v", err)
+	}
+	if first == "" {
+		t.Fatal("passphrase must not be empty")
+	}
+
+	// A second call in the same dir must reuse the persisted passphrase.
+	second, err := fileKeyringPassphrase(dirA)
+	if err != nil {
+		t.Fatalf("fileKeyringPassphrase (reuse): %v", err)
+	}
+	if second != first {
+		t.Errorf("passphrase changed across calls: %q != %q", second, first)
+	}
+
+	// The passphrase file must be owner-only.
+	info, err := os.Stat(filepath.Join(dirA, fallbackPassphraseFile))
+	if err != nil {
+		t.Fatalf("Stat passphrase file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("passphrase file permissions = %o, want 0600", perm)
+	}
+
+	// A different install dir must get a different passphrase.
+	dirB := filepath.Join(t.TempDir(), fallbackKeyringDir)
+	if err := ensurePrivateDir(dirB); err != nil {
+		t.Fatalf("ensurePrivateDir: %v", err)
+	}
+	other, err := fileKeyringPassphrase(dirB)
+	if err != nil {
+		t.Fatalf("fileKeyringPassphrase (dirB): %v", err)
+	}
+	if other == first {
+		t.Error("two independent installs must not share a passphrase")
+	}
+}
+
 // TestBuildDefaultStore_PrefersNativeKeyring verifies the native keyring is
 // used when it opens successfully, without ever consulting the fallback.
 func TestBuildDefaultStore_PrefersNativeKeyring(t *testing.T) {
@@ -760,6 +810,35 @@ func TestBuildDefaultStore_FallsBackToMemory(t *testing.T) {
 
 	if _, ok := store.(*KeyringTokenStore); ok {
 		t.Fatal("expected in-memory store, got *KeyringTokenStore")
+	}
+}
+
+// TestBuildDefaultStore_NilRingFallsThrough guards against a (nil, nil) return
+// from an opener: a nil keyring must be treated like an error and fall through
+// to the next tier rather than constructing a store that panics on first use.
+func TestBuildDefaultStore_NilRingFallsThrough(t *testing.T) {
+	fallback := keyring.NewArrayKeyring(nil)
+
+	// Native opener returns (nil, nil): must not be used, must fall through.
+	store := buildDefaultStore(t.TempDir(),
+		func() (keyring.Keyring, error) { return nil, nil },
+		func(string) (keyring.Keyring, error) { return fallback, nil },
+	)
+	ks, ok := store.(*KeyringTokenStore)
+	if !ok {
+		t.Fatalf("expected *KeyringTokenStore, got %T", store)
+	}
+	if ks.ring != fallback {
+		t.Error("a nil native ring must fall through to the fallback keyring")
+	}
+
+	// Both openers return (nil, nil): must land on the in-memory store.
+	memStore := buildDefaultStore(t.TempDir(),
+		func() (keyring.Keyring, error) { return nil, nil },
+		func(string) (keyring.Keyring, error) { return nil, nil },
+	)
+	if _, ok := memStore.(*KeyringTokenStore); ok {
+		t.Fatal("a nil fallback ring must fall through to the in-memory store")
 	}
 }
 

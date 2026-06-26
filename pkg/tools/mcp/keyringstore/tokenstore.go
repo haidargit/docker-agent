@@ -5,6 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,12 +57,10 @@ const (
 	// the config dir next to the encrypted token file.
 	fallbackKeyringDir = "mcp-oauth-keyring"
 
-	// fallbackKeyringPassword seals the file-backed keyring. It is a fixed,
-	// non-secret value: the fallback's only real boundary is the 0700
-	// directory it lives in, which is the same boundary already protecting
-	// the encrypted token file beside it. It exists solely because the
-	// file backend requires a password function.
-	fallbackKeyringPassword = "docker-agent-oauth-fallback"
+	// fallbackPassphraseFile holds the passphrase that seals the file-backed
+	// keyring. It lives inside fallbackKeyringDir, behind the same 0700
+	// boundary as the keyring itself.
+	fallbackPassphraseFile = "passphrase"
 
 	// Legacy keyring keys from the previous "bundle in the keyring"
 	// layout. Migrated into the encrypted file on first load, then removed.
@@ -118,12 +117,47 @@ func openFileKeyring(dir string) (keyring.Keyring, error) {
 	if err := ensurePrivateDir(dir); err != nil {
 		return nil, err
 	}
+	passphrase, err := fileKeyringPassphrase(dir)
+	if err != nil {
+		return nil, err
+	}
 	return keyring.Open(keyring.Config{
 		ServiceName:      keyringServiceName,
 		AllowedBackends:  []keyring.BackendType{keyring.FileBackend},
 		FileDir:          dir,
-		FilePasswordFunc: keyring.FixedStringPrompt(fallbackKeyringPassword),
+		FilePasswordFunc: keyring.FixedStringPrompt(passphrase),
 	})
+}
+
+// fileKeyringPassphrase returns the passphrase sealing the file-backed
+// keyring, generating and persisting a random per-install value on first use.
+//
+// A random secret rather than a hardcoded constant means reading the source
+// code alone is not enough to decrypt the keyring: an attacker also needs read
+// access to the passphrase file, which lives behind the same owner-only
+// directory as the tokens. The directory remains the real security boundary;
+// this just removes the "public constant" foot-gun so each install is unique.
+func fileKeyringPassphrase(dir string) (string, error) {
+	path := filepath.Join(dir, fallbackPassphraseFile)
+	switch data, err := os.ReadFile(path); {
+	case err == nil:
+		if len(data) == 0 {
+			return "", fmt.Errorf("file keyring passphrase is empty: %s", path)
+		}
+		return string(data), nil
+	case errors.Is(err, os.ErrNotExist):
+		secret := make([]byte, encryptionKeySize)
+		if _, rerr := rand.Read(secret); rerr != nil {
+			return "", fmt.Errorf("failed to generate file keyring passphrase: %w", rerr)
+		}
+		encoded := []byte(hex.EncodeToString(secret))
+		if werr := atomicfile.Write(path, bytes.NewReader(encoded), 0o600); werr != nil {
+			return "", fmt.Errorf("failed to persist file keyring passphrase: %w", werr)
+		}
+		return string(encoded), nil
+	default:
+		return "", fmt.Errorf("failed to read file keyring passphrase: %w", err)
+	}
 }
 
 // defaultStore returns the process-wide token store, opening the OS
@@ -153,10 +187,10 @@ func buildDefaultStore(
 	openFallback func(string) (keyring.Keyring, error),
 ) mcp.OAuthTokenStore {
 	ring, err := openNative()
-	if err != nil {
+	if err != nil || ring == nil {
 		slog.Warn("OS keyring not available, falling back to file-based OAuth token store", "error", err)
 		ring, err = openFallback(filepath.Join(configDir, fallbackKeyringDir))
-		if err != nil {
+		if err != nil || ring == nil {
 			slog.Warn("File-based keyring not available, falling back to in-memory token store", "error", err)
 			return mcp.NewInMemoryTokenStore()
 		}
