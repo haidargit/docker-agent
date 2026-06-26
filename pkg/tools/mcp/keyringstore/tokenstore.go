@@ -51,6 +51,18 @@ const (
 	// dir alongside other docker-agent state.
 	tokenFileName = "mcp-oauth-tokens.enc"
 
+	// fallbackKeyringDir holds the file-backed keyring used when no OS-native
+	// credential store is available (e.g. inside a sandbox). It lives under
+	// the config dir next to the encrypted token file.
+	fallbackKeyringDir = "mcp-oauth-keyring"
+
+	// fallbackKeyringPassword seals the file-backed keyring. It is a fixed,
+	// non-secret value: the fallback's only real boundary is the 0700
+	// directory it lives in, which is the same boundary already protecting
+	// the encrypted token file beside it. It exists solely because the
+	// file backend requires a password function.
+	fallbackKeyringPassword = "docker-agent-oauth-fallback"
+
 	// Legacy keyring keys from the previous "bundle in the keyring"
 	// layout. Migrated into the encrypted file on first load, then removed.
 	legacyBundleKey   = "oauth:tokens"
@@ -74,12 +86,43 @@ type KeyringTokenStore struct {
 	loadErr error
 }
 
+// secureBackends lists the OS-native credential stores we trust. The generic
+// "file" and "pass" backends are deliberately excluded: their openers succeed
+// unconditionally, so leaving them in would mask a missing OS keyring (e.g.
+// inside a sandbox) and defer the failure to the first Get/Set, where it
+// surfaces as the opaque "No directory provided for file keyring" error.
+// Excluding them lets openKeyring return an error we can fall back from.
+var secureBackends = []keyring.BackendType{
+	keyring.WinCredBackend,
+	keyring.KeychainBackend,
+	keyring.SecretServiceBackend,
+	keyring.KWalletBackend,
+	keyring.KeyCtlBackend,
+}
+
 func openKeyring() (keyring.Keyring, error) {
 	return keyring.Open(keyring.Config{
 		ServiceName:                    keyringServiceName,
+		AllowedBackends:                secureBackends,
 		KeychainTrustApplication:       true,
 		KeychainSynchronizable:         false,
 		KeychainAccessibleWhenUnlocked: true,
+	})
+}
+
+// openFileKeyring returns a file-backed keyring rooted in dir, used when no
+// OS-native credential store is available. It persists the encryption key to
+// disk so OAuth tokens survive a restart inside a sandbox, where the in-memory
+// store would force a fresh login on every run.
+func openFileKeyring(dir string) (keyring.Keyring, error) {
+	if err := ensurePrivateDir(dir); err != nil {
+		return nil, err
+	}
+	return keyring.Open(keyring.Config{
+		ServiceName:      keyringServiceName,
+		AllowedBackends:  []keyring.BackendType{keyring.FileBackend},
+		FileDir:          dir,
+		FilePasswordFunc: keyring.FixedStringPrompt(fallbackKeyringPassword),
 	})
 }
 
@@ -97,12 +140,17 @@ var defaultStore = sync.OnceValue(func() mcp.OAuthTokenStore {
 	if testing.Testing() {
 		return mcp.NewInMemoryTokenStore()
 	}
+	configDir := paths.GetConfigDir()
 	ring, err := openKeyring()
 	if err != nil {
-		slog.Warn("OS keyring not available, falling back to in-memory token store", "error", err)
-		return mcp.NewInMemoryTokenStore()
+		slog.Warn("OS keyring not available, falling back to file-based OAuth token store", "error", err)
+		ring, err = openFileKeyring(filepath.Join(configDir, fallbackKeyringDir))
+		if err != nil {
+			slog.Warn("File-based keyring not available, falling back to in-memory token store", "error", err)
+			return mcp.NewInMemoryTokenStore()
+		}
 	}
-	return newKeyringTokenStore(ring, filepath.Join(paths.GetConfigDir(), tokenFileName))
+	return newKeyringTokenStore(ring, filepath.Join(configDir, tokenFileName))
 })
 
 // Register installs the keyring-backed token store as the default for MCP

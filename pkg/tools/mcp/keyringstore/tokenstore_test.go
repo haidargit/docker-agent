@@ -631,6 +631,76 @@ func TestEncryptedStore_KeyringFailureIsCachedOnce(t *testing.T) {
 	}
 }
 
+// TestSecureBackendsExcludeGenericFile guards the fix for the sandbox failure:
+// the generic "file" and "pass" backends must never be in the secure list, or
+// openKeyring would silently return a half-broken backend instead of an error
+// the caller can fall back from.
+func TestSecureBackendsExcludeGenericFile(t *testing.T) {
+	for _, b := range secureBackends {
+		if b == keyring.FileBackend || b == keyring.PassBackend {
+			t.Fatalf("secureBackends must not contain the generic %q backend", b)
+		}
+	}
+}
+
+// TestOpenFileKeyring_Persists verifies the file-backed fallback used inside a
+// sandbox actually persists an item to disk and survives a reopen, so tokens
+// don't vanish between runs.
+func TestOpenFileKeyring_Persists(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), fallbackKeyringDir)
+
+	ring, err := openFileKeyring(dir)
+	if err != nil {
+		t.Fatalf("openFileKeyring: %v", err)
+	}
+	if err := ring.Set(keyring.Item{Key: encryptionKeyItem, Data: []byte("secret")}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	reopened, err := openFileKeyring(dir)
+	if err != nil {
+		t.Fatalf("reopen openFileKeyring: %v", err)
+	}
+	item, err := reopened.Get(encryptionKeyItem)
+	if err != nil {
+		t.Fatalf("Get after reopen: %v", err)
+	}
+	if string(item.Data) != "secret" {
+		t.Errorf("Data = %q, want %q", item.Data, "secret")
+	}
+}
+
+// TestFileKeyringBackedStore_PersistsAcrossReload exercises the full fallback
+// path a sandbox would take: a KeyringTokenStore backed by the file keyring
+// must round-trip tokens across a simulated process restart.
+func TestFileKeyringBackedStore_PersistsAcrossReload(t *testing.T) {
+	root := t.TempDir()
+	keyringDir := filepath.Join(root, fallbackKeyringDir)
+	tokenPath := filepath.Join(root, tokenFileName)
+
+	ring, err := openFileKeyring(keyringDir)
+	if err != nil {
+		t.Fatalf("openFileKeyring: %v", err)
+	}
+
+	const url = "https://mcp.notion.com/sse"
+	if err := newKeyringTokenStore(ring, tokenPath).StoreToken(url, &mcp.OAuthToken{AccessToken: "notion-token"}); err != nil {
+		t.Fatalf("StoreToken: %v", err)
+	}
+
+	reopened, err := openFileKeyring(keyringDir)
+	if err != nil {
+		t.Fatalf("reopen openFileKeyring: %v", err)
+	}
+	got, err := newKeyringTokenStore(reopened, tokenPath).GetToken(url)
+	if err != nil {
+		t.Fatalf("GetToken after reload: %v", err)
+	}
+	if got.AccessToken != "notion-token" {
+		t.Errorf("AccessToken = %q, want %q", got.AccessToken, "notion-token")
+	}
+}
+
 // TestKeyringTokenStore_ConcurrentAccess verifies that concurrent reads and
 // writes to the token store are safe and don't cause data races.
 func TestKeyringTokenStore_ConcurrentAccess(t *testing.T) {
