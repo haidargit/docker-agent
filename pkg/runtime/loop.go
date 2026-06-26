@@ -172,6 +172,21 @@ func (r *LocalRuntime) emitHookDrivenShutdown(
 // the StreamStoppedEvent so external consumers (boards, dashboards) can
 // distinguish between successful completion, crashes, and user-initiated
 // stops without reverse-engineering reconnect failures.
+//
+// Ordering (decided in #3074): StreamStopped is emitted before the session-end
+// hooks and telemetry run, not after, so consumers react immediately (the TUI
+// stops its spinner and drains its queued messages) instead of waiting behind
+// potentially slow user-configured session_end hooks. This is safe because
+// those hooks dispatch with a nil event sink and never emit onto this channel,
+// so StreamStopped stays the last event a consumer observes. The authoritative
+// "all cleanup done" signal is the channel close (done last, in
+// restoreAndClose) that terminates a `for range`, not the StreamStopped event.
+//
+// Delivery: StreamStopped is best-effort. It is emitted non-blockingly and is
+// dropped when the buffer is full and the consumer has gone away, rather than
+// blocking teardown (a blocking send here is the deadlock #3070 fixed).
+// Consumers must rely on the channel close, not on receiving StreamStopped, as
+// the guaranteed terminal signal.
 func (r *LocalRuntime) finalizeEventChannel(ctx context.Context, sess *session.Session, reason string, prevElicitationCh, events chan Event) {
 	a := r.resolveSessionAgent(sess)
 
@@ -179,6 +194,9 @@ func (r *LocalRuntime) finalizeEventChannel(ctx context.Context, sess *session.S
 		reason = turnEndReasonCanceled
 	}
 
+	// Best-effort, non-blocking on purpose: a blocking send here reintroduces
+	// the #3070 teardown deadlock. See the doc comment for the ordering and
+	// delivery contract.
 	nonBlocking(&channelSink{ch: events}).Emit(StreamStopped(sess.ID, a.Name(), reason))
 
 	// Execute session end hooks with a context that won't be cancelled so

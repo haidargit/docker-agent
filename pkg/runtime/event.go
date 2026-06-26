@@ -464,6 +464,15 @@ func SessionCompaction(sessionID, status, agentName string) Event {
 
 func (e *SessionCompactionEvent) GetSessionID() string { return e.SessionID }
 
+// StreamStoppedEvent reports that a RunStream loop has stopped. Reason carries
+// the turnEndReason* classification (normal, error, canceled) so consumers can
+// tell successful completion apart from crashes and user-initiated stops.
+//
+// Delivery is best-effort: it is emitted non-blockingly during teardown and is
+// dropped if the events buffer is full and the consumer has gone away (see
+// finalizeEventChannel). Treat the channel close, not receipt of this event, as
+// the guaranteed terminal signal. Do not assume session-end hooks have finished
+// when this event arrives: it is emitted before they run.
 type StreamStoppedEvent struct {
 	AgentContext
 

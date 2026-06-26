@@ -236,6 +236,49 @@ func TestLocalRuntime_FinalizeEventChannelDoesNotDeadlockWhenBufferFullAndConsum
 	assert.Zero(t, stopped, "StreamStopped should be dropped instead of blocking when the buffer is full")
 }
 
+// TestLocalRuntime_FinalizeEventChannelStreamStoppedIsLastBeforeClose pins the
+// Option B decision from #3074: StreamStopped is emitted before the session-end
+// hooks and telemetry run (so the UI reacts immediately), but it must still be
+// the final event a consumer observes before the channel close that terminates
+// its range. Session-end hooks dispatch with a nil event sink, so nothing is
+// delivered onto the stream after StreamStopped and the close is the terminal
+// signal. If a future change emits onto the events channel after StreamStopped
+// (for example by handing the events sink to a session_end hook), this fails.
+func TestLocalRuntime_FinalizeEventChannelStreamStoppedIsLastBeforeClose(t *testing.T) {
+	t.Parallel()
+
+	rt := newElicitationTestRuntime(t)
+	sess := session.New()
+	events := make(chan Event, defaultEventChannelCapacity)
+	parent := make(chan Event, 1)
+
+	// Seed events that stand in for the stream's prior output so asserting
+	// StreamStopped is *last* is a real ordering check, not merely "it was the
+	// only event delivered".
+	events <- Error("prior stream output 1")
+	events <- Error("prior stream output 2")
+	rt.elicitation.swap(events)
+
+	rt.finalizeEventChannel(t.Context(), sess, turnEndReasonNormal, parent, events)
+
+	var delivered []Event
+	for ev := range events {
+		delivered = append(delivered, ev)
+	}
+
+	require.NotEmpty(t, delivered, "expected events delivered before the channel close")
+
+	var stopped int
+	for _, ev := range delivered {
+		if _, ok := ev.(*StreamStoppedEvent); ok {
+			stopped++
+		}
+	}
+	assert.Equal(t, 1, stopped, "exactly one StreamStopped should be delivered")
+	assert.IsType(t, &StreamStoppedEvent{}, delivered[len(delivered)-1],
+		"StreamStopped must be the last event delivered before the channel closes")
+}
+
 // TestRunStreamClosesChannelAndRestoresElicitationOnEarlyReturn is the
 // regression test for issue #3073: runStreamLoop swapped this stream's
 // events channel into the elicitation bridge before registering the
