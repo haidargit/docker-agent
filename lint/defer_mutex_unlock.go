@@ -124,6 +124,9 @@ func isDeferUnlock(stmt ast.Stmt, lock mutexCall) bool {
 func isSafeManualUnlockAtEnd(stmts []ast.Stmt, lockIdx int, lock mutexCall) bool {
 	unlockIdx := -1
 	for i := lockIdx + 1; i < len(stmts); i++ {
+		if stmtContainsDefer(stmts[i]) {
+			return false
+		}
 		name, recv, ok := selectorCallStmt(stmts[i])
 		if !ok || recv != lock.recv {
 			continue
@@ -152,6 +155,18 @@ func isSafeManualUnlockAtEnd(stmts []ast.Stmt, lockIdx int, lock mutexCall) bool
 		return false
 	}
 	return returnResultsAreSideEffectFree(ret)
+}
+
+func stmtContainsDefer(stmt ast.Stmt) bool {
+	found := false
+	ast.Inspect(stmt, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		_, found = n.(*ast.DeferStmt)
+		return !found
+	})
+	return found
 }
 
 func returnResultsAreSideEffectFree(ret *ast.ReturnStmt) bool {
