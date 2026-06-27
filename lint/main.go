@@ -33,6 +33,7 @@ var cops = []cop.Cop{
 	ConstructorCommandExec,
 	ConstructorNetworkIO,
 	WrapErrors,
+	DeferMutexUnlock,
 }
 
 func main() {

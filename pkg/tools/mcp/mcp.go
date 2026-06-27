@@ -599,8 +599,8 @@ func (c *clientConnector) Connect(ctx context.Context) (lifecycle.Session, error
 
 	slog.DebugContext(ctx, "Started MCP toolset successfully", "server", ts.logID)
 	ts.mu.Lock()
+	defer ts.mu.Unlock()
 	ts.instructions = result.Instructions
-	ts.mu.Unlock()
 
 	return &clientSession{client: ts.mcpClient}, nil
 }
@@ -669,13 +669,13 @@ func (ts *Toolset) Tools(ctx context.Context) ([]tools.Tool, error) {
 	slog.DebugContext(ctx, "Listed MCP tools", "count", len(toolsList), "server", ts.logID)
 
 	ts.mu.Lock()
+	defer ts.mu.Unlock()
 	// Only populate the cache if no invalidation happened while we were
 	// fetching from the server. Otherwise drop the result so the next
 	// caller re-fetches with the latest data.
 	if ts.cacheGen == gen {
 		ts.cachedTools = toolsList
 	}
-	ts.mu.Unlock()
 
 	return toolsList, nil
 }
@@ -971,10 +971,10 @@ func (ts *Toolset) ListPrompts(ctx context.Context) ([]PromptInfo, error) {
 	slog.DebugContext(ctx, "Listed MCP prompts", "count", len(promptsList), "server", ts.logID)
 
 	ts.mu.Lock()
+	defer ts.mu.Unlock()
 	if ts.cacheGen == gen {
 		ts.cachedPrompts = promptsList
 	}
-	ts.mu.Unlock()
 
 	return promptsList, nil
 }

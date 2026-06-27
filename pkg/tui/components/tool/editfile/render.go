@@ -112,12 +112,12 @@ func renderEditFile(toolCall tools.ToolCall, width int, splitView bool, toolStat
 	result := renderEditFileUncached(toolCall, width, splitView, toolStatus)
 
 	cacheMu.Lock()
+	defer cacheMu.Unlock()
 	c.rendered = result
 	c.renderCached = true
 	c.renderedWidth = width
 	c.renderedSplit = splitView
 	c.renderedStatus = toolStatus
-	cacheMu.Unlock()
 
 	return result
 }
@@ -165,10 +165,10 @@ func countDiffLines(toolCall tools.ToolCall, _ types.ToolStatus) (added, removed
 	added, removed = countDiffLinesUncached(toolCall)
 
 	cacheMu.Lock()
+	defer cacheMu.Unlock()
 	c.added = added
 	c.removed = removed
 	c.lineCounted = true
-	cacheMu.Unlock()
 
 	return added, removed
 }

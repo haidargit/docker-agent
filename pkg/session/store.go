@@ -337,8 +337,8 @@ func (s *InMemorySessionStore) AddSummary(_ context.Context, sessionID, summary 
 		return ErrNotFound
 	}
 	session.mu.Lock()
+	defer session.mu.Unlock()
 	session.Messages = append(session.Messages, Item{Summary: summary, FirstKeptEntry: firstKeptEntry})
-	session.mu.Unlock()
 	return nil
 }
 

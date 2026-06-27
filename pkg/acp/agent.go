@@ -420,8 +420,8 @@ func (a *Agent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Promp
 	}
 
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	acpSess.cancel = nil
-	a.mu.Unlock()
 
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 }
