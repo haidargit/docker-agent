@@ -158,8 +158,8 @@ func (a *Agent) newRuntime(workingDir string) (runtime.Runtime, *agent.Agent, er
 // registerSession stores a session in the active sessions map.
 func (a *Agent) registerSession(acpSess *Session) {
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.sessions[acpSess.id] = acpSess
-	a.mu.Unlock()
 }
 
 // registerSessionIfAbsent stores acpSess only if no session with the same id

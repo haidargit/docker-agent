@@ -167,8 +167,8 @@ func (fm *FileManager) GetOrUpload(ctx context.Context, filePath string) (result
 			}
 			// Cache the path mapping
 			fm.mu.Lock()
+			defer fm.mu.Unlock()
 			fm.paths[absPath] = key
-			fm.mu.Unlock()
 			return flight.result, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()

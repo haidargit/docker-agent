@@ -61,11 +61,11 @@ var (
 // Call this when the theme changes to pick up new colors.
 func InvalidateCaches() {
 	cacheMu.Lock()
+	defer cacheMu.Unlock()
 	cache.Range(func(_ string, c *toolRenderCache) bool {
 		c.renderCached = false
 		return true
 	})
-	cacheMu.Unlock()
 }
 
 type chromaToken struct {

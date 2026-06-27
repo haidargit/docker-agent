@@ -295,16 +295,15 @@ func (s *InMemorySessionStore) UpdateMessage(_ context.Context, messageID int64,
 	var found bool
 	s.sessions.Range(func(_ string, session *Session) bool {
 		session.mu.Lock()
+		defer session.mu.Unlock()
 		for i := range session.Messages {
 			if session.Messages[i].Message == nil || session.Messages[i].Message.ID != messageID {
 				continue
 			}
 			session.Messages[i].Message = updated
 			found = true
-			session.mu.Unlock()
 			return false
 		}
-		session.mu.Unlock()
 		return true
 	})
 	if !found {

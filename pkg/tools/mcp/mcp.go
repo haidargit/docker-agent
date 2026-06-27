@@ -314,8 +314,8 @@ func newSupervisor(ts *Toolset, base lifecycle.Policy) *lifecycle.Supervisor {
 	policy.Logger = slog.With("component", "mcp.supervisor", "server", ts.logID)
 	policy.OnDisconnect = func(error) {
 		ts.mu.Lock()
+		defer ts.mu.Unlock()
 		ts.invalidateCache()
-		ts.mu.Unlock()
 	}
 	policy.OnRestart = func() {
 		// Refresh tool and prompt caches eagerly so subsequent
