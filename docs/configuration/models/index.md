@@ -33,6 +33,9 @@ models:
     parallel_tool_calls: boolean # Optional: allow parallel tool calls
     track_usage: boolean # Optional: track token usage
     routing: [list] # Optional: rule-based model routing
+    capabilities: # Optional: override attachment capabilities
+      image: boolean # Optional: whether the model accepts image attachments
+      pdf: boolean # Optional: whether the model accepts PDF attachments
     provider_opts: # Optional: provider-specific options
       key: value
 ```
@@ -56,8 +59,49 @@ models:
 | `parallel_tool_calls` | boolean    | ✗        | Allow model to call multiple tools at once                                            |
 | `track_usage`         | boolean    | ✗        | Track and report token usage for this model                                           |
 | `routing`             | array      | ✗        | Rule-based routing to different models. See [Model Routing]({{ '/configuration/routing/' | relative_url }}). |
+| `capabilities`        | object     | ✗        | Override attachment capabilities for this model. See [Attachment Capability Overrides](#attachment-capability-overrides). |
 | `provider_opts`       | object     | ✗        | Provider-specific options (see provider pages)                                        |
 | `title_model`         | string     | ✗        | Model used for session-title generation. Can be a named model from the `models:` section or an inline `provider/model` string. When omitted, the agent's primary model generates titles. Cannot be combined with `first_available`. |
+
+## Attachment Capability Overrides
+
+For custom OpenAI-compatible providers, local models (Ollama, DMR), and any
+model the built-in catalogue does not describe, docker-agent cannot
+auto-detect whether the endpoint accepts image or PDF attachments. When the
+model is absent from the catalogue, docker-agent logs a diagnostic and falls
+back to text-only, silently dropping attachments.
+
+Declare `capabilities` to make the model's attachment support authoritative
+and skip the catalogue lookup entirely:
+
+```yaml
+models:
+  llava-local:
+    provider: ollama
+    model: llava
+    capabilities:
+      image: true   # accepts image attachments
+      pdf: false    # does not accept PDFs
+
+  proxy-vision:
+    provider: vision-proxy
+    model: gpt-4o
+    capabilities:
+      image: true
+      pdf: true
+```
+
+| Field                  | Type    | Description                                       |
+| ---------------------- | ------- | ------------------------------------------------- |
+| `capabilities.image`   | boolean | Whether the model accepts image attachments       |
+| `capabilities.pdf`     | boolean | Whether the model accepts PDF attachments         |
+
+The flags must match what the endpoint actually accepts. Claiming a modality
+that the endpoint does not support leads to a provider-side API error. When
+`capabilities` is omitted the behaviour is unchanged (catalogue lookup then
+conservative text-only fallback).
+
+See [`examples/capability-overrides.yaml`](https://github.com/docker/docker-agent/blob/main/examples/capability-overrides.yaml) for a complete example.
 
 ## Delegating Session-Title Generation
 
