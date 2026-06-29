@@ -97,31 +97,42 @@ func resolveInstructionFiles(cfg *latest.Config, source Source) error {
 			return fmt.Errorf("agent %q: 'instruction_file' is only supported for local file-based configs, not OCI/URL sources", agent.Name)
 		}
 
-		root, err := os.OpenRoot(parentDir)
+		instruction, err := readInstructionFiles(parentDir, agent.InstructionFile)
 		if err != nil {
-			return fmt.Errorf("agent %q: opening config directory %q: %w", agent.Name, parentDir, err)
+			return fmt.Errorf("agent %q: %w", agent.Name, err)
 		}
 
-		parts := make([]string, 0, len(agent.InstructionFile))
-		for _, path := range agent.InstructionFile {
-			if !filepath.IsLocal(path) {
-				_ = root.Close()
-				return fmt.Errorf("agent %q: instruction_file %q must be a local relative path inside the config directory", agent.Name, path)
-			}
-			data, err := root.ReadFile(filepath.ToSlash(path))
-			if err != nil {
-				_ = root.Close()
-				return fmt.Errorf("agent %q: reading instruction_file %q: %w", agent.Name, path, err)
-			}
-			parts = append(parts, string(data))
-		}
-		_ = root.Close()
-
-		agent.Instruction = strings.Join(parts, "\n\n")
+		agent.Instruction = instruction
 		agent.InstructionFile = nil
 	}
 
 	return nil
+}
+
+// readInstructionFiles loads each path (resolved inside parentDir with
+// os.OpenRoot so symlinks cannot escape) and returns their contents joined by
+// a blank line. Each path must be a local relative path: absolute paths and
+// "../" traversal are rejected.
+func readInstructionFiles(parentDir string, paths []string) (string, error) {
+	root, err := os.OpenRoot(parentDir)
+	if err != nil {
+		return "", fmt.Errorf("opening config directory %q: %w", parentDir, err)
+	}
+	defer root.Close()
+
+	parts := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if !filepath.IsLocal(path) {
+			return "", fmt.Errorf("instruction_file %q must be a local relative path inside the config directory", path)
+		}
+		data, err := root.ReadFile(filepath.ToSlash(path))
+		if err != nil {
+			return "", fmt.Errorf("reading instruction_file %q: %w", path, err)
+		}
+		parts = append(parts, string(data))
+	}
+
+	return strings.Join(parts, "\n\n"), nil
 }
 
 // CheckRequiredEnvVars checks which environment variables are required by the models and tools.
