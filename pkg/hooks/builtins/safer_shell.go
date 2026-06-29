@@ -32,7 +32,8 @@ import (
 )
 
 // SaferShell is the registered name of the builtin that classifies
-// destructive shell commands and forces confirmation via SafetyCheck.
+// destructive shell commands and forces confirmation by preempting
+// --yolo on the pre_tool_use chain.
 const SaferShell = "safer_shell"
 
 // shellToolName is the tool name that this builtin acts on. The shell
@@ -147,7 +148,7 @@ func compileSafe(value any) ([]safePattern, error) {
 // On taxonomy load failure the call is routed to user confirmation
 // with blast_radius=unknown rather than allowed silently — failing
 // closed is the security-meaningful choice and matches [failClosed]'s
-// treatment of EventSafetyCheck.
+// treatment of the pre_tool_use preempt-yolo lane.
 func saferShell(_ context.Context, in *hooks.Input, _ []string) (*hooks.Output, error) {
 	if in == nil || in.HookEventName != hooks.EventPreToolUse {
 		return nil, nil

@@ -57,7 +57,7 @@ before `Decide()` / `--yolo`. Three behaviors:
 - **Known-safe reads** (`ls`, `cat`, `git status`, `git diff`, `docker ps`, `docker logs`, `kubectl get`, …) flow through silently — they're treated as no-opinion and follow the regular approval pipeline (`--yolo`, permission rules, read-only hint).
 - **Everything else** asks with `blast_radius=unknown`. Safer mode is conservative by default: unrecognised commands surface to the user before `--yolo` or permission allow-rules can auto-approve them.
 
-The verdict cannot be bypassed by `--yolo` or by a `permission_request` hook that returns `allow` — `safety_check` runs before both. Compound shell (`a && b`, `a; b`, `a | b`) is never matched against the safe allowlist; any destructive segment falls through to ask. The full taxonomy lives in [`pkg/hooks/builtins/safety_patterns.json`](https://github.com/docker/docker-agent/blob/main/pkg/hooks/builtins/safety_patterns.json).
+The verdict cannot be bypassed by `--yolo` or by a `permission_request` hook that returns `allow` — the `preempt_yolo` lane runs before both. Compound shell (`a && b`, `a; b`, `a | b`) is never matched against the safe allowlist; any destructive segment falls through to ask. The full taxonomy lives in [`pkg/hooks/builtins/safety_patterns.json`](https://github.com/docker/docker-agent/blob/main/pkg/hooks/builtins/safety_patterns.json).
 
 See [`examples/shell_safer.yaml`](https://github.com/docker/docker-agent/blob/main/examples/shell_safer.yaml) for a full example. Under the hood, `safer: true` is a sugar that appends one entry under `hooks.pre_tool_use` with `preempt_yolo: true`; writing the entry by hand achieves the same thing.
 

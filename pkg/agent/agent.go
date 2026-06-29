@@ -103,8 +103,8 @@ func (a *Agent) RedactSecrets() bool {
 
 // SaferShell reports whether any of the agent's shell toolsets opted
 // into the `safer: true` destructive-command guard. When true, the
-// runtime auto-injects the safer_shell builtin under safety_check;
-// see [builtins.ApplyAgentDefaults].
+// runtime auto-injects the safer_shell builtin under pre_tool_use
+// with preempt_yolo:true; see [builtins.ApplyAgentDefaults].
 func (a *Agent) SaferShell() bool {
 	return a.saferShell
 }

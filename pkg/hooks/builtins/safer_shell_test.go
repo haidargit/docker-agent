@@ -11,7 +11,7 @@ import (
 
 // TestSaferShell_MatchesDestructivePatterns covers the destructive
 // taxonomy: each fixture must produce an Ask verdict with the
-// expected blast-radius level when run under EventSafetyCheck against
+// expected blast-radius level when run under EventPreToolUse against
 // a shell tool call. Metadata carries blast_radius + category + reason.
 func TestSaferShell_MatchesDestructivePatterns(t *testing.T) {
 	cases := []struct {
@@ -172,7 +172,7 @@ func TestSaferShell_AcceptsCommandAliasKey(t *testing.T) {
 
 // TestSaferShell_NoOpForNonShellTool keeps the no-op contract: the
 // builtin is registered under matcher "*", so it sees every
-// safety_check dispatch. It must return nil for tools it doesn't
+// pre_tool_use dispatch. It must return nil for tools it doesn't
 // classify.
 func TestSaferShell_NoOpForNonShellTool(t *testing.T) {
 	out, err := saferShell(t.Context(), &hooks.Input{

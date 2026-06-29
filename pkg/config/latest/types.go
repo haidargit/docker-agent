@@ -1207,7 +1207,7 @@ type Toolset struct {
 
 	// For the `shell` toolset — opt in to destructive-command detection.
 	// When enabled, the agent auto-registers the safer_shell builtin under
-	// the safety_check hook event. Destructive commands (rm -rf, docker
+	// pre_tool_use with preempt_yolo:true. Destructive commands (rm -rf, docker
 	// volume rm, mkfs, …) get an Ask verdict carrying a blast-radius
 	// classification; known-safe reads (ls, git status, docker ps, …)
 	// flow through silently; everything else asks with blast_radius=unknown

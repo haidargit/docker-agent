@@ -172,7 +172,7 @@ func (d *toolConfirmationDialog) renderSafetyWarning(contentWidth int) string {
 
 // renderMetadata renders the key/value annotations attached to the
 // confirmation prompt (static toolset metadata merged with any
-// permission_request / safety_check hook contributions). Returns ""
+// permission_request / preempt-yolo pre_tool_use hook contributions). Returns ""
 // when there is none.
 //
 // Metadata keys the safer_shell builtin uses to express its verdict

@@ -86,8 +86,8 @@ func TestAggregateTracksMostRestrictiveDecision(t *testing.T) {
 }
 
 // TestAggregateDecisionEmptyForNonPreToolUse documents that
-// Result.Decision is meaningful only for pre_tool_use and
-// safety_check events. Other events (turn_start, post_tool_use, ...)
+// Result.Decision is meaningful only for pre_tool_use (both the
+// default and preempt-yolo lanes). Other events (turn_start, post_tool_use, ...)
 // MUST leave it empty so a runtime that consults it can't accidentally
 // act on a stale verdict from an unrelated hook.
 func TestAggregateDecisionEmptyForNonPreToolUse(t *testing.T) {
