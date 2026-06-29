@@ -146,11 +146,12 @@ func TestFetchModelsFromURL_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/v1/models", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"object":"list","data":[
+		_, err := w.Write([]byte(`{"object":"list","data":[
 			{"id":"model-a","object":"model"},
 			{"id":"model-b","object":"model"},
 			{"id":"model-c","object":"model"}
 		]}`))
+		assert.NoError(t, err)
 	}))
 	t.Cleanup(server.Close)
 
@@ -187,7 +188,8 @@ func TestFetchModelsFromURL_MalformedJSON(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`not json`))
+		_, err := w.Write([]byte(`not json`))
+		assert.NoError(t, err)
 	}))
 	t.Cleanup(server.Close)
 
@@ -212,7 +214,8 @@ func TestFetchModelsFromURL_EmptyDataArray(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"object":"list","data":[]}`))
+		_, err := w.Write([]byte(`{"object":"list","data":[]}`))
+		assert.NoError(t, err)
 	}))
 	t.Cleanup(server.Close)
 
@@ -225,11 +228,12 @@ func TestFetchModelsFromURL_DuplicateIDs(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"object":"list","data":[
+		_, err := w.Write([]byte(`{"object":"list","data":[
 			{"id":"dup"},
 			{"id":"dup"},
 			{"id":"unique"}
 		]}`))
+		assert.NoError(t, err)
 	}))
 	t.Cleanup(server.Close)
 
@@ -242,11 +246,12 @@ func TestFetchModelsFromURL_EmptyIDs(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"object":"list","data":[
+		_, err := w.Write([]byte(`{"object":"list","data":[
 			{"id":""},
 			{"id":"valid"},
 			{"id":""}
 		]}`))
+		assert.NoError(t, err)
 	}))
 	t.Cleanup(server.Close)
 
@@ -277,10 +282,11 @@ func TestFetchModelsFromURL_SkipsEmbeddingModels(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"object":"list","data":[
+		_, err := w.Write([]byte(`{"object":"list","data":[
 			{"id":"text-embedding-3"},
 			{"id":"gpt-5"}
 		]}`))
+		assert.NoError(t, err)
 	}))
 	t.Cleanup(server.Close)
 
