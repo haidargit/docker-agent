@@ -243,6 +243,15 @@ type call struct {
 	tc        tools.ToolCall // mutable: pre_tool_use hooks may rewrite arguments
 	tool      tools.Tool     // tool.Name is always set; other fields zero when !available
 	available bool           // false when the tool wasn't in the agent's toolset
+
+	// pre_tool_use preempt-yolo lane result cache. The first
+	// consultPreToolUsePreYolo call dispatches EventPreToolUsePreYolo
+	// and stores the verdict; subsequent calls return the cached
+	// result. Without the cache, approveAndRun + askUser +
+	// confirmationMetadata would dispatch the lane up to three times
+	// per tool call.
+	preYoloComputed bool
+	preYoloResult   *hooks.Result
 }
 
 // run processes a single tool call and returns its outcome. All span
@@ -311,14 +320,21 @@ func (c *call) run(ctx context.Context) CallOutcome {
 //
 // The pipeline order is:
 //
+//  0. pre_tool_use entries with preempt_yolo:true — fire BEFORE the
+//     deterministic checkers so a Deny or Ask verdict here preempts
+//     --yolo and permission allow rules. Allow / no-opinion fall
+//     through. The safer_shell builtin is the canonical user; its
+//     verdict's metadata is surfaced to the confirmation event via
+//     [call.confirmationMetadata].
 //  1. yolo / permission checkers (delegated to [Decide]) — deterministic
 //     verdicts win first. ForceAsk goes straight to the user.
-//  2. pre_tool_use hooks (LLM-judge, shell scripts, ...) — consulted
-//     ONLY when no deterministic checker matched. The hook can Deny
-//     (block), Allow (skip the user prompt) or Ask (force the prompt).
-//     Hooks may also rewrite tool arguments via UpdatedInput, in which
-//     case the rewrite is applied here so the user prompt and the tool
-//     handler both see the modified call.
+//  2. pre_tool_use hooks (LLM-judge, shell scripts, ...) — the
+//     default lane, consulted ONLY when no deterministic checker
+//     matched. The hook can Deny (block), Allow (skip the user
+//     prompt) or Ask (force the prompt). Hooks may also rewrite tool
+//     arguments via UpdatedInput, in which case the rewrite is
+//     applied here so the user prompt and the tool handler both see
+//     the modified call.
 //  3. read-only hint — auto-approve when the tool advertises it.
 //  4. user confirmation — fallback prompt.
 //
@@ -328,6 +344,26 @@ func (c *call) run(ctx context.Context) CallOutcome {
 // that an LLM judge gets a turn on every call that isn't covered by an
 // explicit allow/deny rule.
 func (c *call) approveAndRun(ctx context.Context, runTool func() CallOutcome) CallOutcome {
+	// Stage 0: pre_tool_use entries flagged with preempt_yolo:true fire
+	// before the deterministic checkers so destructive-command
+	// verdicts can preempt --yolo / permissions.
+	if r := c.consultPreToolUsePreYolo(ctx); r != nil {
+		switch r.Decision {
+		case hooks.DecisionDeny:
+			slog.DebugContext(ctx, "Tool denied by preempt-yolo pre_tool_use hook", "tool", c.tc.Function.Name, "session_id", c.sess.ID, "reason", r.DecisionReason)
+			c.notifyApproval(ctx, ApprovalDecisionDeny, ApprovalSourcePreToolUseHookDeny)
+			rejectMsg := "The tool call was rejected by a pre_tool_use hook."
+			if reason := strings.TrimSpace(r.DecisionReason); reason != "" {
+				rejectMsg += " Reason: " + reason
+			}
+			c.errorResponse(ctx, rejectMsg)
+			return CallOutcome{}
+		case hooks.DecisionAsk:
+			return c.askUser(ctx, runTool)
+		}
+		// DecisionAllow / "" → advisory; fall through to Decide().
+	}
+
 	var checkers []NamedChecker
 	if c.d.Permissions != nil {
 		checkers = c.d.Permissions(c.sess)
@@ -373,6 +409,32 @@ func (c *call) approveAndRun(ctx context.Context, runTool func() CallOutcome) Ca
 		return runTool()
 	}
 	return c.askUser(ctx, runTool)
+}
+
+// consultPreToolUsePreYolo dispatches the preempt-yolo lane of the
+// pre_tool_use hook chain for this call and caches the verdict. The
+// preempt lane runs BEFORE the deterministic approval pipeline
+// ([Decide], --yolo, permission patterns, the default pre_tool_use
+// lane) so a deny/ask verdict here cannot be bypassed by
+// auto-approval rules. Returns nil when no preempt-yolo entry is
+// registered, the hooks dispatcher itself is nil, or the chain
+// returned no opinion.
+//
+// Cached after the first call: approveAndRun consults it once,
+// askUser reads its Decision to skip permission_request when the
+// lane returned Ask, and confirmationMetadata reads its Metadata to
+// enrich the confirmation event. Without the cache the chain would
+// dispatch up to three times per call.
+func (c *call) consultPreToolUsePreYolo(ctx context.Context) *hooks.Result {
+	if c.preYoloComputed {
+		return c.preYoloResult
+	}
+	c.preYoloComputed = true
+	if c.d.Hooks == nil {
+		return nil
+	}
+	c.preYoloResult = c.d.Hooks.Dispatch(ctx, c.a, hooks.EventPreToolUsePreYolo, NewHooksInput(c.sess, c.tc))
+	return c.preYoloResult
 }
 
 // consultPreToolUseHook fires the pre_tool_use hook chain in the
@@ -505,11 +567,19 @@ func denySourceForChecker(checkerSource string) string {
 //
 // permission_request hooks fire first and may short-circuit the prompt
 // with an explicit allow or deny verdict; returning nothing falls
-// through to the interactive confirmation.
+// through to the interactive confirmation. The permission_request
+// chain is SKIPPED entirely when the preempt-yolo lane of pre_tool_use
+// produced an Ask verdict — that's the whole point of the lane
+// preempting --yolo, and letting a policy-level permission_request
+// hook auto-allow the call would unwind that protection.
 func (c *call) askUser(ctx context.Context, runTool func() CallOutcome) CallOutcome {
-	outcome, handled, hookMeta := c.runPermissionRequestHook(ctx, runTool)
-	if handled {
-		return outcome
+	var hookMeta map[string]string
+	if c.preYoloResult == nil || c.preYoloResult.Decision != hooks.DecisionAsk {
+		outcome, handled, meta := c.runPermissionRequestHook(ctx, runTool)
+		if handled {
+			return outcome
+		}
+		hookMeta = meta
 	}
 
 	slog.DebugContext(ctx, "Tools not approved, waiting for resume", "tool", c.tc.Function.Name, "session_id", c.sess.ID)
@@ -583,16 +653,28 @@ func (c *call) runPermissionRequestHook(ctx context.Context, runTool func() Call
 }
 
 // confirmationMetadata merges the tool's static metadata (set by the
-// toolset) with the per-call metadata a permission_request hook
-// contributed. Hook keys win on a clash. Returns nil when neither
-// source supplied anything, so the confirmation event stays lean.
-func (c *call) confirmationMetadata(hookMeta map[string]string) map[string]string {
-	if len(c.tool.Metadata) == 0 && len(hookMeta) == 0 {
+// toolset) with the per-call metadata contributed by permission_request
+// and the preempt-yolo lane of pre_tool_use. Merge order — and
+// therefore key-clash precedence — is:
+//
+//	tool static  <  permission_request  <  pre_tool_use (preempt_yolo)
+//
+// the preempt-yolo lane wins because it carries security verdicts (blast
+// radius, classification) that a policy-level permission_request hook
+// must not silently overwrite. Returns nil when no source supplied
+// anything so the confirmation event stays lean.
+func (c *call) confirmationMetadata(permissionMeta map[string]string) map[string]string {
+	var safetyMeta map[string]string
+	if c.preYoloResult != nil {
+		safetyMeta = c.preYoloResult.Metadata
+	}
+	if len(c.tool.Metadata) == 0 && len(permissionMeta) == 0 && len(safetyMeta) == 0 {
 		return nil
 	}
-	merged := make(map[string]string, len(c.tool.Metadata)+len(hookMeta))
+	merged := make(map[string]string, len(c.tool.Metadata)+len(permissionMeta)+len(safetyMeta))
 	maps.Copy(merged, c.tool.Metadata)
-	maps.Copy(merged, hookMeta)
+	maps.Copy(merged, permissionMeta)
+	maps.Copy(merged, safetyMeta)
 	return merged
 }
 

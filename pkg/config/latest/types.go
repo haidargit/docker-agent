@@ -793,6 +793,34 @@ func (a *AgentConfig) RedactSecretsEnabled() bool {
 	return *a.RedactSecrets
 }
 
+// SaferShellEnabled reports whether any of the agent's shell toolsets
+// has opted into destructive-command detection. The flag lives on the
+// toolset (not the agent), so this aggregates across all of an agent's
+// toolsets — one match anywhere flips the agent-level flag the runtime
+// uses to register the safer_shell builtin.
+//
+// Off by default: a missing pointer or explicit `safer: false` does
+// not enable the feature. Only an explicit `safer: true` on at least
+// one shell toolset switches it on.
+//
+// Multi-toolset note: when an agent declares more than one shell
+// toolset and only some opt in, the safer_shell builtin still runs
+// for every shell call on this agent (it filters by ToolName, not
+// by toolset identity). Author one shell toolset per agent when you
+// need toolset-scoped granularity.
+func (a *AgentConfig) SaferShellEnabled() bool {
+	if a == nil {
+		return false
+	}
+	for i := range a.Toolsets {
+		ts := &a.Toolsets[i]
+		if ts.Type == "shell" && ts.Safer != nil && *ts.Safer {
+			return true
+		}
+	}
+	return false
+}
+
 // GetFallbackRetries returns the fallback retries from the config.
 func (a *AgentConfig) GetFallbackRetries() int {
 	if a.Fallback != nil {
@@ -1176,6 +1204,17 @@ type Toolset struct {
 	// is declined automatically and sudo fails as before. No effect on Windows.
 	// nil/false keeps the default behaviour (sudo has no TTY and fails fast).
 	SudoAskpass *bool `json:"sudo_askpass,omitempty" yaml:"sudo_askpass,omitempty"`
+
+	// For the `shell` toolset — opt in to destructive-command detection.
+	// When enabled, the agent auto-registers the safer_shell builtin under
+	// the safety_check hook event. Destructive commands (rm -rf, docker
+	// volume rm, mkfs, …) get an Ask verdict carrying a blast-radius
+	// classification; known-safe reads (ls, git status, docker ps, …)
+	// flow through silently; everything else asks with blast_radius=unknown
+	// so the user sees the prompt before --yolo or permission allow-rules
+	// can auto-approve it. nil/false leaves the agent's shell calls subject
+	// only to the regular approval pipeline.
+	Safer *bool `json:"safer,omitempty" yaml:"safer,omitempty"`
 
 	// For the `rag` tool
 	RAGConfig *RAGConfig `json:"rag_config,omitempty" yaml:"rag_config,omitempty"`
@@ -2234,6 +2273,20 @@ type HookMatcherConfig struct {
 
 	// Hooks are the hooks to execute when the matcher matches
 	Hooks []HookDefinition `json:"hooks" yaml:"hooks"`
+
+	// PreemptYolo opts a pre_tool_use entry into firing BEFORE the
+	// deterministic approval pipeline (--yolo, permission patterns).
+	// A deny/ask verdict from a preempting hook cannot be bypassed by
+	// auto-approval rules; an allow verdict is advisory (the pipeline
+	// still runs Decide() and the rest of pre_tool_use). Default
+	// pre_tool_use entries fire AFTER Decide(), as before. Only valid
+	// on pre_tool_use; ignored on other events.
+	//
+	// Used by the safer_shell builtin (auto-registered with this flag
+	// when a shell toolset has `safer: true`). Custom hooks set it to
+	// true when they implement a security-critical check that must
+	// not be bypassed by --yolo.
+	PreemptYolo *bool `json:"preempt_yolo,omitempty" yaml:"preempt_yolo,omitempty"`
 }
 
 // HookDefinition represents a single hook configuration

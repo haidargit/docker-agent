@@ -702,3 +702,197 @@ func TestDispatcher_ConfirmationMetadataNilWhenNoneSupplied(t *testing.T) {
 	require.Len(t, em.confirmationMeta, 1)
 	assert.Nil(t, em.confirmationMeta[0])
 }
+
+// TestDispatcher_PreToolUsePreYoloAskPreemptsYolo pins the load-
+// bearing property of the preempt-yolo lane of pre_tool_use: an Ask
+// verdict must route to user confirmation even when ToolsApproved
+// (--yolo / Allow All) would otherwise auto-run the call. Also
+// verifies the hook's Metadata reaches the confirmation event.
+func TestDispatcher_PreToolUsePreYoloAskPreemptsYolo(t *testing.T) {
+	a := newAgent()
+	sess := session.New()
+	sess.ToolsApproved = true
+
+	tool := tools.Tool{
+		Name: "shell",
+		Handler: func(context.Context, tools.ToolCall) (*tools.ToolCallResult, error) {
+			panic("must not run before approval")
+		},
+	}
+
+	hd := &stubHookDispatcher{
+		on: map[hooks.EventType]*hooks.Result{
+			hooks.EventPreToolUsePreYolo: {
+				Allowed:        true,
+				Decision:       hooks.DecisionAsk,
+				DecisionReason: "rm -rf <path>: irreversible",
+				Metadata: map[string]string{
+					"blast_radius": "high",
+					"category":     "fs-delete",
+				},
+			},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	d := &toolexec.Dispatcher{
+		AgentFor: func(*session.Session) *agent.Agent { return a },
+		Hooks:    hd,
+	}
+	em := &captureEmitter{confirmed: make(chan struct{})}
+	go func() {
+		<-em.confirmed
+		cancel()
+	}()
+
+	d.Process(ctx, sess, []tools.ToolCall{{
+		ID:       "danger",
+		Function: tools.FunctionCall{Name: "shell", Arguments: `{"cmd":"rm -rf /tmp/x"}`},
+	}}, []tools.Tool{tool}, em)
+
+	require.Len(t, em.confirmations, 1, "Ask must route to user confirmation despite --yolo")
+	require.Len(t, em.confirmationMeta, 1)
+	assert.Equal(t, "high", em.confirmationMeta[0]["blast_radius"],
+		"preempt-yolo hook Metadata must reach the confirmation event")
+	assert.Equal(t, "fs-delete", em.confirmationMeta[0]["category"])
+	require.Len(t, em.responses, 1)
+	assert.True(t, em.responses[0].IsError)
+	assert.Contains(t, em.responses[0].Output, "canceled by the user")
+}
+
+// TestDispatcher_PreToolUsePreYoloDenyShortCircuits pins the Deny
+// path: a preempt-yolo Deny verdict goes straight to errorResponse
+// without emitting a confirmation event or consulting
+// permission_request.
+func TestDispatcher_PreToolUsePreYoloDenyShortCircuits(t *testing.T) {
+	a := newAgent()
+	sess := session.New()
+	sess.ToolsApproved = true
+
+	tool := tools.Tool{
+		Name: "shell",
+		Handler: func(context.Context, tools.ToolCall) (*tools.ToolCallResult, error) {
+			panic("must not run when denied")
+		},
+	}
+
+	hd := &stubHookDispatcher{
+		on: map[hooks.EventType]*hooks.Result{
+			hooks.EventPreToolUsePreYolo: {
+				Allowed:        false,
+				Decision:       hooks.DecisionDeny,
+				DecisionReason: "blocked by policy",
+			},
+		},
+	}
+
+	d := &toolexec.Dispatcher{
+		AgentFor: func(*session.Session) *agent.Agent { return a },
+		Hooks:    hd,
+	}
+	em := &captureEmitter{}
+
+	d.Process(t.Context(), sess, []tools.ToolCall{{
+		ID:       "x",
+		Function: tools.FunctionCall{Name: "shell", Arguments: `{"cmd":"rm -rf /tmp/x"}`},
+	}}, []tools.Tool{tool}, em)
+
+	assert.Empty(t, em.confirmations, "Deny must not emit a confirmation event")
+	require.Len(t, em.responses, 1)
+	assert.True(t, em.responses[0].IsError)
+	assert.Contains(t, em.responses[0].Output, "pre_tool_use hook")
+	assert.Contains(t, em.responses[0].Output, "blocked by policy")
+}
+
+// TestDispatcher_PreToolUsePreYoloAllowIsAdvisory pins the Allow
+// path: an Allow verdict from the preempt-yolo lane is informational,
+// the pipeline still proceeds. With ToolsApproved=true the call must
+// auto-run.
+func TestDispatcher_PreToolUsePreYoloAllowIsAdvisory(t *testing.T) {
+	a := newAgent()
+	sess := session.New()
+	sess.ToolsApproved = true
+
+	ran := false
+	tool := tools.Tool{
+		Name: "shell",
+		Handler: func(context.Context, tools.ToolCall) (*tools.ToolCallResult, error) {
+			ran = true
+			return tools.ResultSuccess("ok"), nil
+		},
+	}
+
+	hd := &stubHookDispatcher{
+		on: map[hooks.EventType]*hooks.Result{
+			hooks.EventPreToolUsePreYolo: {
+				Allowed:  true,
+				Decision: hooks.DecisionAllow,
+			},
+		},
+	}
+
+	d := &toolexec.Dispatcher{
+		AgentFor: func(*session.Session) *agent.Agent { return a },
+		Hooks:    hd,
+	}
+	em := &captureEmitter{}
+
+	d.Process(t.Context(), sess, []tools.ToolCall{{
+		ID:       "x",
+		Function: tools.FunctionCall{Name: "shell", Arguments: `{"cmd":"ls /tmp"}`},
+	}}, []tools.Tool{tool}, em)
+
+	assert.True(t, ran, "Allow from preempt-yolo lane is advisory; --yolo must still allow the call")
+	assert.Empty(t, em.confirmations)
+}
+
+// TestDispatcher_PreToolUseDefaultLaneSkippedUnderYolo pins the
+// backwards-compat contract for default-lane pre_tool_use hooks: when
+// --yolo (ToolsApproved) auto-approves the call, the default lane is
+// NOT consulted. This protects existing pre_tool_use hooks
+// (llm_judge, redact_secrets) from a latency tax on every yolo'd
+// call — only entries that explicitly opt into preempt_yolo:true run
+// before Decide().
+func TestDispatcher_PreToolUseDefaultLaneSkippedUnderYolo(t *testing.T) {
+	a := newAgent()
+	sess := session.New()
+	sess.ToolsApproved = true
+
+	ran := false
+	tool := tools.Tool{
+		Name: "shell",
+		Handler: func(context.Context, tools.ToolCall) (*tools.ToolCallResult, error) {
+			ran = true
+			return tools.ResultSuccess("ok"), nil
+		},
+	}
+
+	// A default-lane pre_tool_use hook that WOULD ask the user — but
+	// must not be consulted because --yolo auto-approved upstream.
+	hd := &stubHookDispatcher{
+		on: map[hooks.EventType]*hooks.Result{
+			hooks.EventPreToolUse: {
+				Allowed:        true,
+				Decision:       hooks.DecisionAsk,
+				DecisionReason: "would normally ask",
+			},
+		},
+	}
+
+	d := &toolexec.Dispatcher{
+		AgentFor: func(*session.Session) *agent.Agent { return a },
+		Hooks:    hd,
+	}
+	em := &captureEmitter{}
+
+	d.Process(t.Context(), sess, []tools.ToolCall{{
+		ID:       "x",
+		Function: tools.FunctionCall{Name: "shell", Arguments: `{"cmd":"ls /tmp"}`},
+	}}, []tools.Tool{tool}, em)
+
+	assert.True(t, ran, "--yolo must auto-run when no preempt-yolo hook is registered")
+	assert.NotContains(t, hd.dispatched, hooks.EventPreToolUse,
+		"default pre_tool_use lane must not fire under --yolo; only preempt_yolo:true entries do")
+	assert.Empty(t, em.confirmations)
+}
