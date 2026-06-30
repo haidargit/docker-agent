@@ -55,6 +55,14 @@ func TestAPIKeyHeaderUpdater(t *testing.T) {
 			expectedHeader: "Authorization",
 			expectedValue:  "Bearer test-mistral-key",
 		},
+		{
+			name:           "OpenRouter",
+			host:           "https://openrouter.ai/api/v1",
+			envKey:         "OPENROUTER_API_KEY",
+			envValue:       "test-openrouter-key",
+			expectedHeader: "Authorization",
+			expectedValue:  "Bearer test-openrouter-key",
+		},
 	}
 
 	for _, tt := range tests {
@@ -93,6 +101,7 @@ func TestTargetURLForHost(t *testing.T) {
 		{"https://api.anthropic.com", true},
 		{"https://generativelanguage.googleapis.com", true},
 		{"https://api.mistral.ai/v1", true},
+		{"https://openrouter.ai/api/v1", true},
 		{"https://unknown.host.com", false},
 	}
 
