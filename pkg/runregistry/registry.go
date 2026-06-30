@@ -71,10 +71,12 @@ func (r *Registry) Write(rec Record) (func(), error) {
 	// already-existing dir may be group/world-readable. Tighten it explicitly
 	// to keep live PIDs/addresses unreadable by other local users. This is
 	// best-effort: a dir we don't own (e.g. created by root before dropping
-	// privileges) can't be chmod'd, but such a dir is also unlikely to be
-	// readable by arbitrary local users, so we log and carry on rather than
-	// breaking Write permanently.
-	if info, err := os.Stat(r.dir); err == nil && info.Mode().Perm() != 0o700 {
+	// privileges) can't be chmod'd, so we log and carry on rather than breaking
+	// Write permanently — the directory's existing permissions still apply.
+	switch info, err := os.Stat(r.dir); {
+	case err != nil:
+		slog.Warn("Could not stat run registry dir to verify permissions", "dir", r.dir, "error", err)
+	case info.Mode().Perm() != 0o700:
 		if err := os.Chmod(r.dir, 0o700); err != nil { //nolint:gosec // directory needs execute bit; 0700 is owner-only
 			slog.Warn("Could not tighten run registry dir permissions", "dir", r.dir, "error", err)
 		}
