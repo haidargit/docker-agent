@@ -23,12 +23,15 @@ func tableExpander(vars map[string]string) func(string) (string, error) {
 }
 
 func TestModelConfig_ExpandEnv(t *testing.T) {
+	t.Parallel()
+
 	vars := map[string]string{
 		"NEMOTRON3_MODEL": "huggingface.co/unsloth/nemotron-3-nano:Q3_K_M",
 		"DMR_BASE_URL":    "http://localhost:12434/engines/v1",
 	}
 
 	t.Run("expands model and base_url", func(t *testing.T) {
+		t.Parallel()
 		m := &ModelConfig{
 			Provider: "dmr",
 			Model:    "${env.NEMOTRON3_MODEL}",
@@ -43,6 +46,7 @@ func TestModelConfig_ExpandEnv(t *testing.T) {
 	})
 
 	t.Run("plain values unchanged", func(t *testing.T) {
+		t.Parallel()
 		m := &ModelConfig{Model: "gpt-4o", BaseURL: "https://api.openai.com/v1"}
 		require.NoError(t, m.ExpandEnv(tableExpander(vars)))
 		assert.Equal(t, "gpt-4o", m.Model)
@@ -50,6 +54,7 @@ func TestModelConfig_ExpandEnv(t *testing.T) {
 	})
 
 	t.Run("empty fields and nil expander are no-ops", func(t *testing.T) {
+		t.Parallel()
 		m := &ModelConfig{Model: "${env.NEMOTRON3_MODEL}"}
 		require.NoError(t, m.ExpandEnv(nil))
 		assert.Equal(t, "${env.NEMOTRON3_MODEL}", m.Model)
@@ -61,11 +66,13 @@ func TestModelConfig_ExpandEnv(t *testing.T) {
 	})
 
 	t.Run("nil receiver is a no-op", func(t *testing.T) {
+		t.Parallel()
 		var m *ModelConfig
 		require.NoError(t, m.ExpandEnv(tableExpander(vars)))
 	})
 
 	t.Run("propagates expander error", func(t *testing.T) {
+		t.Parallel()
 		boom := errors.New("variable not set")
 		m := &ModelConfig{Model: "${env.MISSING}"}
 		err := m.ExpandEnv(func(string) (string, error) { return "", boom })

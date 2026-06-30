@@ -13,6 +13,8 @@ import (
 )
 
 func TestToolsMetadata(t *testing.T) {
+	t.Parallel()
+
 	ts := New()
 	defs, err := ts.Tools(t.Context())
 	require.NoError(t, err)
@@ -26,12 +28,16 @@ func TestToolsMetadata(t *testing.T) {
 }
 
 func TestInstructionsMentionBothTools(t *testing.T) {
+	t.Parallel()
+
 	instr := New().Instructions()
 	assert.Contains(t, instr, ToolNameListSessions)
 	assert.Contains(t, instr, ToolNameReadSession)
 }
 
 func TestClampLimit(t *testing.T) {
+	t.Parallel()
+
 	assert.Equal(t, DefaultListLimit, ClampLimit(0))
 	assert.Equal(t, DefaultListLimit, ClampLimit(-5))
 	assert.Equal(t, 7, ClampLimit(7))
@@ -48,6 +54,8 @@ func assistantMsg(content string) chat.Message {
 }
 
 func TestRenderTranscriptHeaderAndBody(t *testing.T) {
+	t.Parallel()
+
 	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	out := RenderTranscript(Header{
 		ID:          "abc123",
@@ -70,6 +78,8 @@ func TestRenderTranscriptHeaderAndBody(t *testing.T) {
 }
 
 func TestRenderTranscriptUntitled(t *testing.T) {
+	t.Parallel()
+
 	out := RenderTranscript(Header{ID: "x"}, []chat.Message{userMsg("hi")}, 0)
 	assert.Contains(t, out, "# Session x — (untitled)")
 	// A zero CreatedAt is omitted rather than printing a year-1 timestamp.
@@ -77,6 +87,8 @@ func TestRenderTranscriptUntitled(t *testing.T) {
 }
 
 func TestRenderTranscriptRendersToolCalls(t *testing.T) {
+	t.Parallel()
+
 	msg := chat.Message{
 		Role: chat.MessageRoleAssistant,
 		ToolCalls: []tools.ToolCall{
@@ -88,6 +100,8 @@ func TestRenderTranscriptRendersToolCalls(t *testing.T) {
 }
 
 func TestRenderTranscriptSkipsEmptyMessages(t *testing.T) {
+	t.Parallel()
+
 	out := RenderTranscript(Header{ID: "x"}, []chat.Message{
 		{Role: chat.MessageRoleAssistant, Content: "   "},
 		userMsg("real content"),
@@ -98,6 +112,8 @@ func TestRenderTranscriptSkipsEmptyMessages(t *testing.T) {
 }
 
 func TestRenderTranscriptMultiContentFallback(t *testing.T) {
+	t.Parallel()
+
 	msg := chat.Message{
 		Role: chat.MessageRoleUser,
 		MultiContent: []chat.MessagePart{
@@ -111,6 +127,8 @@ func TestRenderTranscriptMultiContentFallback(t *testing.T) {
 }
 
 func TestRenderTranscriptTruncatesOldestFirst(t *testing.T) {
+	t.Parallel()
+
 	msgs := []chat.Message{
 		userMsg("OLDEST oldest oldest " + strings.Repeat("a", 200)),
 		assistantMsg("MIDDLE middle middle " + strings.Repeat("b", 200)),
@@ -126,6 +144,8 @@ func TestRenderTranscriptTruncatesOldestFirst(t *testing.T) {
 }
 
 func TestRenderTranscriptKeepsAtLeastOneBlock(t *testing.T) {
+	t.Parallel()
+
 	// Even with an impossibly small budget, the single newest block is kept so
 	// read_session never returns a header with no conversation.
 	out := RenderTranscript(Header{ID: "x", NumMessages: 1}, []chat.Message{
