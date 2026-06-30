@@ -362,8 +362,7 @@ func TestSnapshotAndRestoreModelOverride(t *testing.T) {
 }
 
 func TestModel_LogsSelection(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: it swaps the process-global default logger via slog.SetDefault.
 	var buf concurrent.Buffer
 	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})
 	prev := slog.Default()
