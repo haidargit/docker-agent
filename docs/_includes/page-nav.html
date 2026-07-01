@@ -1,9 +1,18 @@
-{% comment %}Build a flat list of all pages from nav data and find prev/next{% endcomment %}
+{% comment %}Build a flat list of all pages from nav data (handles both flat items and grouped items) and find prev/next{% endcomment %}
 {% assign all_pages = "" | split: "" %}
 {% for group in site.data.nav %}
-  {% for item in group.items %}
-    {% assign all_pages = all_pages | push: item %}
-  {% endfor %}
+  {% if group.items %}
+    {% for item in group.items %}
+      {% assign all_pages = all_pages | push: item %}
+    {% endfor %}
+  {% endif %}
+  {% if group.groups %}
+    {% for sub in group.groups %}
+      {% for item in sub.items %}
+        {% assign all_pages = all_pages | push: item %}
+      {% endfor %}
+    {% endfor %}
+  {% endif %}
 {% endfor %}
 
 {% assign current_index = -1 %}

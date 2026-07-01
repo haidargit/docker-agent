@@ -44,55 +44,65 @@
       url: /configuration/routing/
 
 - section: Built-in Tools
-  items:
-    - title: Filesystem
-      url: /tools/filesystem/
-    - title: Shell
-      url: /tools/shell/
-    - title: Think
-      url: /tools/think/
-    - title: Plan
-      url: /tools/plan/
-    - title: Session Plan
-      url: /tools/session_plan/
-    - title: Session Context
-      url: /tools/session_context/
-    - title: Todo
-      url: /tools/todo/
-    - title: Memory
-      url: /tools/memory/
-    - title: Tasks
-      url: /tools/tasks/
-    - title: Fetch
-      url: /tools/fetch/
-    - title: Script
-      url: /tools/script/
-    - title: LSP
-      url: /tools/lsp/
-    - title: API
-      url: /tools/api/
-    - title: User Prompt
-      url: /tools/user-prompt/
-    - title: Open URL
-      url: /tools/open-url/
-    - title: Transfer Task
-      url: /tools/transfer-task/
-    - title: Background Agents
-      url: /tools/background-agents/
-    - title: Handoff
-      url: /tools/handoff/
-    - title: Model Picker
-      url: /tools/model-picker/
-    - title: OpenAPI
-      url: /tools/openapi/
-    - title: MCP
-      url: /tools/mcp/
-    - title: A2A
-      url: /tools/a2a/
-    - title: RAG
-      url: /tools/rag/
-    - title: MCP Catalog
-      url: /tools/mcp-catalog/
+  groups:
+    - label: File & Shell
+      items:
+        - title: Filesystem
+          url: /tools/filesystem/
+        - title: Shell
+          url: /tools/shell/
+        - title: Script
+          url: /tools/script/
+        - title: Open URL
+          url: /tools/open-url/
+        - title: Fetch
+          url: /tools/fetch/
+    - label: Agent Coordination
+      items:
+        - title: A2A
+          url: /tools/a2a/
+        - title: Handoff
+          url: /tools/handoff/
+        - title: Transfer Task
+          url: /tools/transfer-task/
+        - title: Background Agents
+          url: /tools/background-agents/
+    - label: Memory & Knowledge
+      items:
+        - title: Memory
+          url: /tools/memory/
+        - title: RAG
+          url: /tools/rag/
+        - title: MCP Catalog
+          url: /tools/mcp-catalog/
+        - title: MCP
+          url: /tools/mcp/
+    - label: Planning & Reasoning
+      items:
+        - title: Think
+          url: /tools/think/
+        - title: Plan
+          url: /tools/plan/
+        - title: Session Plan
+          url: /tools/session_plan/
+        - title: Todo
+          url: /tools/todo/
+        - title: Tasks
+          url: /tools/tasks/
+    - label: Interaction
+      items:
+        - title: User Prompt
+          url: /tools/user-prompt/
+        - title: Model Picker
+          url: /tools/model-picker/
+        - title: Session Context
+          url: /tools/session_context/
+        - title: LSP
+          url: /tools/lsp/
+        - title: OpenAPI
+          url: /tools/openapi/
+        - title: API
+          url: /tools/api/
 
 - section: Features
   items:
@@ -164,24 +174,25 @@
     - title: Provider Definitions
       url: /providers/custom/
 
-- section: Guides
-  items:
-    - title: Tips & Best Practices
-      url: /guides/tips/
-    - title: Thinking / Reasoning
-      url: /guides/thinking/
-    - title: Managing Secrets
-      url: /guides/secrets/
-    - title: Go SDK
-      url: /guides/go-sdk/
-
-- section: Community
-  items:
-    - title: Contributing
-      url: /community/contributing/
-    - title: Troubleshooting
-      url: /community/troubleshooting/
-    - title: Telemetry
-      url: /community/telemetry/
-    - title: OpenTelemetry Tracing
-      url: /community/opentelemetry/
+- section: Resources
+  groups:
+    - label: Guides
+      items:
+        - title: Tips & Best Practices
+          url: /guides/tips/
+        - title: Thinking / Reasoning
+          url: /guides/thinking/
+        - title: Managing Secrets
+          url: /guides/secrets/
+        - title: Go SDK
+          url: /guides/go-sdk/
+    - label: Community
+      items:
+        - title: Contributing
+          url: /community/contributing/
+        - title: Troubleshooting
+          url: /community/troubleshooting/
+        - title: Telemetry
+          url: /community/telemetry/
+        - title: OpenTelemetry Tracing
+          url: /community/opentelemetry/

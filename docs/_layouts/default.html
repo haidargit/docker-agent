@@ -8,7 +8,7 @@
 
   {% comment %}
     Source path of the current page on disk, used by the right-column
-    \"Edit this page\" link in js/app.js. We point at GitHub's web editor
+    "Edit this page" link in js/app.js. We point at GitHub's web editor
     on the configured repo + branch.
   {% endcomment %}
   <meta name="docs-edit-url" content="https://github.com/docker/docker-agent/edit/main/docs/{{ page.path | replace_first: 'docs/', '' | default: 'index.md' }}">
@@ -35,12 +35,36 @@
   <nav class="sidebar" id="sidebar" role="navigation" aria-label="Documentation navigation">
     <div class="sidebar-tagline">{{ site.tagline | default: 'Run AI agents like containers.' }}</div>
     {% for group in site.data.nav %}
-    <div class="sidebar-section">
-      <div class="sidebar-heading">{{ group.section }}</div>
-      {% for item in group.items %}
-      <a class="sidebar-link{% if page.url == item.url %} active{% endif %}" href="{{ item.url | relative_url }}">{{ item.title }}</a>
-      {% endfor %}
-    </div>
+      {% comment %}Determine whether this section contains the current page{% endcomment %}
+      {% assign section_active = false %}
+      {% if group.items %}
+        {% for item in group.items %}
+          {% if item.url == page.url %}{% assign section_active = true %}{% endif %}
+        {% endfor %}
+      {% endif %}
+      {% if group.groups %}
+        {% for sub in group.groups %}
+          {% for item in sub.items %}
+            {% if item.url == page.url %}{% assign section_active = true %}{% endif %}
+          {% endfor %}
+        {% endfor %}
+      {% endif %}
+    <details class="sidebar-section"{% if section_active %} open{% endif %} title="{{ group.section }}">
+      <summary class="sidebar-heading">{{ group.section }}</summary>
+      {% if group.items %}
+        {% for item in group.items %}
+        <a class="sidebar-link{% if page.url == item.url %} active{% endif %}" href="{{ item.url | relative_url }}">{{ item.title }}</a>
+        {% endfor %}
+      {% endif %}
+      {% if group.groups %}
+        {% for sub in group.groups %}
+        <div class="sidebar-subheading">{{ sub.label }}</div>
+          {% for item in sub.items %}
+        <a class="sidebar-link sidebar-link--sub{% if page.url == item.url %} active{% endif %}" href="{{ item.url | relative_url }}">{{ item.title }}</a>
+          {% endfor %}
+        {% endfor %}
+      {% endif %}
+    </details>
     {% endfor %}
   </nav>
 
