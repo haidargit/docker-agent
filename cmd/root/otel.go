@@ -56,8 +56,11 @@ func initOTelSDK(ctx context.Context) (err error) {
 	lp, err := newLoggerProvider(ctx, res, endpoint)
 	if err != nil {
 		// Detach from ctx's cancellation but keep its trace context so
-		// cleanup still runs if ctx is already done.
-		_ = mp.Shutdown(context.WithoutCancel(ctx))
+		// cleanup still runs if ctx is already done. Bound it so a slow
+		// exporter can't block the failure path indefinitely.
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = mp.Shutdown(shutdownCtx)
 		_ = shutdownTracerProvider(ctx, tp)
 		return fmt.Errorf("failed to create logger provider: %w", err)
 	}

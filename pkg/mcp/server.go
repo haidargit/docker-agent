@@ -87,8 +87,11 @@ func StartHTTPServer(ctx context.Context, agentFilename, agentName string, runCo
 	select {
 	case <-ctx.Done():
 		// ctx is done; detach from its cancellation but keep its trace
-		// context so the graceful shutdown can still run.
-		return httpServer.Shutdown(context.WithoutCancel(ctx))
+		// context so the graceful shutdown can still run. Bound it so a
+		// hung client connection can't block shutdown indefinitely.
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		return httpServer.Shutdown(shutdownCtx)
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
