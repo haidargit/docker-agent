@@ -195,6 +195,7 @@ remote MCP endpoints.
 | [`nebius.yaml`](nebius.yaml) | Nebius cloud provider. |
 | [`baseten.yaml`](baseten.yaml) | Baseten cloud provider. |
 | [`ovhcloud.yaml`](ovhcloud.yaml) | OVHcloud AI Endpoints provider. |
+| [`groq.yaml`](groq.yaml) | Groq fast-inference provider. |
 | [`grok.yaml`](grok.yaml) | xAI Grok model. |
 | [`github-copilot.yaml`](github-copilot.yaml) | GitHub Copilot models via OAuth device-flow. |
 | [`fallback_models.yaml`](fallback_models.yaml) | Automatic fallback to a secondary model when the primary fails. |

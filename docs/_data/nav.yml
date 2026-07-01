@@ -149,6 +149,8 @@
       url: /providers/baseten/
     - title: OVHcloud
       url: /providers/ovhcloud/
+    - title: Groq
+      url: /providers/groq/
     - title: MiniMax
       url: /providers/minimax/
     - title: OpenRouter

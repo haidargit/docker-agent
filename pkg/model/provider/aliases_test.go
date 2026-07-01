@@ -71,6 +71,20 @@ func TestOVHcloudAlias(t *testing.T) {
 	assert.True(t, IsCatalogProvider("ovhcloud"))
 }
 
+func TestGroqAlias(t *testing.T) {
+	t.Parallel()
+
+	alias, ok := LookupAlias("groq")
+	require.True(t, ok)
+	assert.Equal(t, Alias{
+		APIType:     "openai",
+		BaseURL:     "https://api.groq.com/openai/v1",
+		TokenEnvVar: "GROQ_API_KEY",
+	}, alias)
+	assert.True(t, IsKnownProvider("groq"))
+	assert.True(t, IsCatalogProvider("groq"))
+}
+
 func TestEachAlias(t *testing.T) {
 	t.Parallel()
 
