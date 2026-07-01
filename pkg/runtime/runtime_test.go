@@ -4113,3 +4113,109 @@ func TestEmptyTurnEmitsWarning(t *testing.T) {
 	require.NotNil(t, warn, "expected a Warning event for an empty turn")
 	assert.Contains(t, warn.Message, "empty response")
 }
+
+// TestEmptyTrailingTurnAfterToolCallsIsSilent verifies that a natural empty
+// stop immediately following a tool-call turn does NOT emit the empty-response
+// warning. This is the common fork-skill tail (the last action is a tool call
+// such as commit/open-pr, then the model stops with nothing left to say); the
+// scary rate-limit / token-cap warning there is pure noise. Turns that stop
+// empty WITHOUT preceding tool work still warn (covered by TestEmptyTurnEmitsWarning).
+func TestEmptyTrailingTurnAfterToolCallsIsSilent(t *testing.T) {
+	t.Parallel()
+
+	doneTool := tools.Tool{
+		Name:       "do_thing",
+		Parameters: map[string]any{},
+		Handler: func(_ context.Context, _ tools.ToolCall) (*tools.ToolCallResult, error) {
+			return tools.ResultSuccess("done"), nil
+		},
+	}
+
+	// Turn 1: model calls the tool and keeps going.
+	// Turn 2: model stops with no content and no tool calls (benign tail).
+	turn1 := newStreamBuilder().
+		AddToolCallName("c1", "do_thing").
+		AddToolCallArguments("c1", `{}`).
+		AddToolCallStopWithUsage(5, 5).
+		Build()
+	turn2 := newStreamBuilder().
+		AddStopWithUsage(3, 0).
+		Build()
+
+	prov := &recordingProvider{
+		id:      "test/mock-model",
+		streams: []*mockStream{turn1, turn2},
+	}
+
+	ts := newStubToolSet(nil, []tools.Tool{doneTool}, nil)
+	root := agent.New("root", "test", agent.WithModel(prov), agent.WithToolSets(ts))
+	tm := team.New(team.WithAgents(root))
+
+	rt, err := NewLocalRuntime(t.Context(), tm, WithSessionCompaction(false), WithModelStore(mockModelStore{}))
+	require.NoError(t, err)
+	rt.registerDefaultTools()
+
+	sess := session.New(session.WithUserMessage("Do the thing"))
+	sess.Title = "empty trailing turn test"
+	sess.ToolsApproved = true
+
+	evCh := rt.RunStream(t.Context(), sess)
+	var events []Event
+	for ev := range evCh {
+		events = append(events, ev)
+	}
+
+	for _, ev := range events {
+		if w, ok := ev.(*WarningEvent); ok {
+			assert.NotContains(t, w.Message, "empty response",
+				"a benign empty stop right after tool calls must not emit the empty-response warning")
+		}
+	}
+}
+
+// TestEmptyTurnWarning exercises the pure classification helper directly,
+// covering each branch without spinning up a full run loop.
+func TestEmptyTurnWarning(t *testing.T) {
+	t.Parallel()
+
+	t.Run("benign stop after tool calls is silent", func(t *testing.T) {
+		res := streamResult{Stopped: true}
+		got := emptyTurnWarning(res, true, "test/model", chat.FinishReasonStop)
+		assert.Empty(t, got)
+	})
+
+	t.Run("reasoning-only turn warns about reasoning", func(t *testing.T) {
+		res := streamResult{Stopped: true, ReasoningContent: "thinking..."}
+		got := emptyTurnWarning(res, false, "test/model", chat.FinishReasonStop)
+		assert.Contains(t, got, "only reasoning")
+	})
+
+	t.Run("benign check takes precedence over reasoning-only", func(t *testing.T) {
+		// A reasoning-only turn that naturally stops right after tool work is
+		// still benign: the tool calls were the turn's real output.
+		res := streamResult{Stopped: true, ReasoningContent: "thinking..."}
+		got := emptyTurnWarning(res, true, "test/model", chat.FinishReasonStop)
+		assert.Empty(t, got)
+	})
+
+	t.Run("empty turn without prior tool calls warns", func(t *testing.T) {
+		res := streamResult{Stopped: true}
+		got := emptyTurnWarning(res, false, "test/model", chat.FinishReasonStop)
+		assert.Contains(t, got, "empty response")
+	})
+
+	t.Run("length finish after tool calls still warns (truncated, not benign)", func(t *testing.T) {
+		// A "length" stop means the reply was cut off by the output token
+		// limit; even after tool calls this is a real truncation the user
+		// should see, so it must NOT be silenced by the benign case.
+		res := streamResult{Stopped: true}
+		got := emptyTurnWarning(res, true, "test/model", chat.FinishReasonLength)
+		assert.Contains(t, got, "empty response")
+	})
+
+	t.Run("non-stop empty turn after tool calls still warns", func(t *testing.T) {
+		res := streamResult{Stopped: false}
+		got := emptyTurnWarning(res, true, "test/model", chat.FinishReasonNull)
+		assert.Contains(t, got, "empty response")
+	})
+}

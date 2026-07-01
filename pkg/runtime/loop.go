@@ -412,9 +412,13 @@ func (r *LocalRuntime) runStreamLoop(ctx context.Context, sess *session.Session,
 		a = r.resolveSessionAgent(sess)
 
 		// Clear per-tool model override on agent switch so it doesn't
-		// leak from one agent's toolset into another agent's turn.
+		// leak from one agent's toolset into another agent's turn. Also
+		// reset prevTurnMadeToolCalls so a new agent's empty first turn is
+		// judged on its own merits, not silenced by the previous agent's
+		// tool activity.
 		if a.Name() != ls.prevAgentName {
 			ls.toolModelOverride = ""
+			ls.prevTurnMadeToolCalls = false
 			ls.prevAgentName = a.Name()
 		}
 
@@ -563,6 +567,47 @@ type loopState struct {
 	sessionStartMsgs    []chat.Message
 	userPromptMsgs      []chat.Message
 	exitReason          string
+	// prevTurnMadeToolCalls reports whether the immediately preceding
+	// turn emitted tool calls. Used to classify an empty trailing turn:
+	// a clean stop right after tool work is benign (the model already
+	// did its job and has nothing left to say — common at the tail of a
+	// fork-skill sequence), not the rate-limit / token-cap case the
+	// empty-response warning would otherwise imply. Reset on agent switch
+	// so it never carries across agents.
+	prevTurnMadeToolCalls bool
+}
+
+// emptyTurnWarning classifies an empty assistant turn (no content, no tool
+// calls) and returns the user-facing warning message, or "" when the turn is
+// benign and should stay silent. Known cases:
+//   - benign: a clean stop (finish_reason "stop") right after a tool-call turn
+//     — the model already did its work and had nothing left to say (common at
+//     the tail of a fork-skill sequence, e.g. commit / open-pr). The real
+//     answer is the previous assistant message, so a UI warning would be noise.
+//     Only "stop" qualifies: a "length" finish after tool calls means the reply
+//     was truncated by the output token limit and must still warn.
+//   - reasoning-only: thinking-mode models (e.g. Qwen3 via
+//     openai_chatcompletions) that stream only reasoning tokens and then stop
+//     or hit the output token limit, leaving visible content empty (see #3145).
+//   - otherwise: an empty stream from a rate-limited or token-capped provider.
+//
+// Refusals are handled separately by the caller and never reach here.
+func emptyTurnWarning(res streamResult, prevTurnMadeToolCalls bool, modelID string, reason chat.FinishReason) string {
+	switch {
+	case reason == chat.FinishReasonStop && prevTurnMadeToolCalls:
+		return ""
+	case strings.TrimSpace(res.ReasoningContent) != "":
+		return fmt.Sprintf(
+			"Model %s produced only reasoning and no reply (stop reason: %s). "+
+				"Thinking-mode models can emit reasoning tokens without a final answer; "+
+				"the reasoning is not used as the response.",
+			modelID, reason)
+	default:
+		return fmt.Sprintf(
+			"Model %s returned an empty response (stop reason: %s). "+
+				"This usually means the provider rate-limited the request or the output token limit was reached.",
+			modelID, reason)
+	}
 }
 
 // runTurn performs one iteration of the run-stream loop, from
@@ -733,33 +778,25 @@ func (r *LocalRuntime) runTurn(
 	} else if strings.TrimSpace(res.Content) == "" && len(res.Calls) == 0 {
 		// Surface otherwise-silent empty turns. recordAssistantMessage skips a
 		// turn with no content and no tool calls, which previously left the user
-		// staring at silence with no explanation. Two known causes:
-		//   - thinking-mode models (e.g. Qwen3 via openai_chatcompletions) that
-		//     stream only reasoning tokens and then stop or hit the output token
-		//     limit, so the visible content stays empty (see #3145); and
-		//   - an empty stream from a rate-limited or token-capped provider.
-		// Refusals are reported above and are excluded here by the else branch.
+		// staring at silence with no explanation. See emptyTurnWarning for the
+		// classification of the known causes.
 		reason := res.FinishReason
 		if reason == "" {
 			reason = chat.FinishReasonNull
 		}
-		var warning string
-		if strings.TrimSpace(res.ReasoningContent) != "" {
-			warning = fmt.Sprintf(
-				"Model %s produced only reasoning and no reply (stop reason: %s). "+
-					"Thinking-mode models can emit reasoning tokens without a final answer; "+
-					"the reasoning is not used as the response.",
-				modelID.String(), reason)
+		warning := emptyTurnWarning(res, ls.prevTurnMadeToolCalls, modelID.String(), reason)
+		if warning == "" {
+			// Benign trailing stop after tool work: log at debug for
+			// traceability without alarming the user or noising up WARN logs.
+			slog.DebugContext(ctx, "Empty trailing turn after tool calls (benign natural stop)",
+				"agent", a.Name(), "model", modelID.String(),
+				"finish_reason", string(reason), "session_id", sess.ID)
 		} else {
-			warning = fmt.Sprintf(
-				"Model %s returned an empty response (stop reason: %s). "+
-					"This usually means the provider rate-limited the request or the output token limit was reached.",
-				modelID.String(), reason)
+			slog.WarnContext(ctx, "Empty assistant turn",
+				"agent", a.Name(), "model", modelID.String(),
+				"finish_reason", string(reason), "reasoning_length", len(res.ReasoningContent), "session_id", sess.ID)
+			events.Emit(Warning(warning, a.Name()))
 		}
-		slog.WarnContext(ctx, "Empty assistant turn",
-			"agent", a.Name(), "model", modelID.String(),
-			"finish_reason", string(reason), "reasoning_length", len(res.ReasoningContent), "session_id", sess.ID)
-		events.Emit(Warning(warning, a.Name()))
 	}
 
 	msgUsage := r.recordAssistantMessage(sess, a, res, agentTools, modelID.String(), msgCost, events)
@@ -830,6 +867,12 @@ func (r *LocalRuntime) runTurn(
 		endReason = turnEndReasonHookBlocked
 		return turnExit
 	}
+
+	// Record whether this turn made tool calls so the next iteration can
+	// classify a trailing empty turn as a benign post-tool stop rather than
+	// a rate-limit / token-cap event. Set after processToolCalls so it
+	// reflects the turn just completed.
+	ls.prevTurnMadeToolCalls = len(res.Calls) > 0
 
 	// Record per-toolset model override for the next LLM turn.
 	ls.toolModelOverride = toolexec.ResolveModelOverride(res.Calls, agentTools)
