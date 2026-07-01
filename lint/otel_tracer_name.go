@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	modulePath    = "github.com/docker/docker-agent"
-	appTracerName = "docker-agent"
+	modulePath     = "github.com/docker/docker-agent"
+	versionPkgPath = modulePath + "/pkg/version"
+	cmdRootPkgPath = modulePath + "/cmd/root"
 )
 
 // OTelTracerName enforces package-scoped OpenTelemetry instrumentation names.
@@ -41,7 +42,7 @@ var OTelTracerName = &cop.Func{
 			}
 			arg := call.Args[0]
 			name, ok := tracerName(p, arg)
-			if !ok || name == expected || isAppName(p.Info, arg, name) {
+			if !ok || name == expected || isAppName(p.Info, arg) {
 				return
 			}
 			if name == "cagent" {
@@ -72,12 +73,13 @@ func packageImportPath(pkgPath string) string {
 	return modulePath + "/" + strings.TrimPrefix(pkgPath, "./")
 }
 
-func isAppName(info *types.Info, expr ast.Expr, name string) bool {
-	if name != appTracerName {
+func isAppName(info *types.Info, expr ast.Expr) bool {
+	c, ok := constObject(info, expr)
+	if !ok || c.Name() != "AppName" || c.Pkg() == nil {
 		return false
 	}
-	c, ok := constObject(info, expr)
-	return ok && c.Name() == "AppName"
+	pkg := c.Pkg().Path()
+	return pkg == versionPkgPath || pkg == cmdRootPkgPath
 }
 
 func constStringValue(info *types.Info, expr ast.Expr) (string, bool) {

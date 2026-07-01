@@ -20,14 +20,17 @@ func f() { _ = otel.Tracer("cagent") }
 	assert.Contains(t, offenses[0].Message, `otel.Tracer(AppName)`)
 }
 
-func TestOTelTracerNameAllowsAppName(t *testing.T) {
+func TestOTelTracerNameFlagsLocalAppName(t *testing.T) {
 	t.Parallel()
+	// A local const named AppName from an unrelated package must not bypass the cop.
 	src := `package p
 import "go.opentelemetry.io/otel"
 const AppName = "docker-agent"
 func f() { _ = otel.Tracer(AppName) }
 `
-	assert.Empty(t, coptest.RunTyped(t, OTelTracerName, src))
+	offenses := coptest.RunTyped(t, OTelTracerName, src)
+	require.Len(t, offenses, 1)
+	assert.Contains(t, offenses[0].Message, `got "docker-agent"`)
 }
 
 func TestOTelTracerNameAllowsVersionAppName(t *testing.T) {
