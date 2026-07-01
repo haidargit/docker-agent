@@ -61,6 +61,7 @@ var cloudProviders = []providerConfig{
 	{"deepseek", []string{"DEEPSEEK_API_KEY"}, "DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"},
 	{"cerebras", []string{"CEREBRAS_API_KEY"}, "CEREBRAS_API_KEY", "CEREBRAS_API_KEY"},
 	{"together", []string{"TOGETHER_API_KEY"}, "TOGETHER_API_KEY", "TOGETHER_API_KEY"},
+	{"huggingface", []string{"HF_TOKEN"}, "HF_TOKEN", "HF_TOKEN"},
 	{"amazon-bedrock", []string{
 		"AWS_BEARER_TOKEN_BEDROCK",
 		"AWS_ACCESS_KEY_ID",
@@ -131,6 +132,7 @@ var DefaultModels = map[string]string{
 	"deepseek":       "deepseek-chat",
 	"cerebras":       "gpt-oss-120b",
 	"together":       "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+	"huggingface":    "meta-llama/Llama-3.3-70B-Instruct",
 	"amazon-bedrock": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
 	"opencode-go":    "deepseek-v4-flash",
 	"opencode-zen":   "deepseek-v4-flash-free",

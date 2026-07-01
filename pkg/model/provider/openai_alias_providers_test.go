@@ -74,6 +74,14 @@ var openAIAliasProviders = []openAIAliasProvider{
 		greeting:             "Hello from Together",
 		mergesSystemMessages: true,
 	},
+	{
+		provider:             "huggingface",
+		envVar:               "HF_TOKEN",
+		testKey:              "hf_test-huggingface-key",
+		model:                "meta-llama/Llama-3.3-70B-Instruct",
+		greeting:             "Hello from Hugging Face",
+		mergesSystemMessages: true,
+	},
 }
 
 // TestOpenAIAliasProvider_EndToEndRequest drives a real request through the full

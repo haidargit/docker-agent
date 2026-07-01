@@ -72,6 +72,7 @@ docker-agent also includes built-in aliases for these providers:
 | DeepSeek       | `deepseek`       | `DEEPSEEK_API_KEY`                  |
 | Cerebras       | `cerebras`       | `CEREBRAS_API_KEY`                  |
 | Together AI    | `together`       | `TOGETHER_API_KEY`                  |
+| Hugging Face   | `huggingface`    | `HF_TOKEN`                          |
 | Requesty       | `requesty`       | `REQUESTY_API_KEY`                  |
 | OpenRouter     | `openrouter`     | `OPENROUTER_API_KEY`                |
 | Azure OpenAI   | `azure`          | `AZURE_API_KEY` + `base_url`        |

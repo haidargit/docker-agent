@@ -155,6 +155,8 @@
       url: /providers/google/
     - title: Groq
       url: /providers/groq/
+    - title: Hugging Face
+      url: /providers/huggingface/
     - title: Local Models
       url: /providers/local/
     - title: MiniMax

@@ -237,13 +237,14 @@ func (c *Client) convertMessages(ctx context.Context, messages []chat.Message) [
 // (openai, mistral, xai, minimax, github-copilot, opencode) tolerate multiple
 // system messages and are deliberately absent so their behavior is unchanged.
 var openModelHostProviders = map[string]bool{
-	"baseten":    true,
-	"ovhcloud":   true,
-	"openrouter": true,
-	"nebius":     true,
-	"cerebras":   true,
-	"fireworks":  true,
-	"together":   true,
+	"baseten":     true,
+	"ovhcloud":    true,
+	"openrouter":  true,
+	"nebius":      true,
+	"cerebras":    true,
+	"fireworks":   true,
+	"together":    true,
+	"huggingface": true,
 }
 
 // shouldMergeConsecutiveMessages reports whether the chat-completions request

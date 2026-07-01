@@ -106,6 +106,13 @@ func TestAvailableProviders_NoGateway(t *testing.T) {
 			expectedProvider: "together",
 		},
 		{
+			name: "huggingface token present",
+			envVars: map[string]string{
+				"HF_TOKEN": "test-token",
+			},
+			expectedProvider: "huggingface",
+		},
+		{
 			name:             "no api keys - defaults to dmr",
 			envVars:          map[string]string{},
 			expectedProvider: "dmr",
@@ -331,6 +338,15 @@ func TestAutoModelConfig(t *testing.T) {
 			expectedMaxTokens: 32000,
 		},
 		{
+			name: "huggingface provider",
+			envVars: map[string]string{
+				"HF_TOKEN": "test-token",
+			},
+			expectedProvider:  "huggingface",
+			expectedModel:     "meta-llama/Llama-3.3-70B-Instruct",
+			expectedMaxTokens: 32000,
+		},
+		{
 			name:              "dmr provider (no api keys)",
 			envVars:           map[string]string{},
 			expectedProvider:  "dmr",
@@ -412,7 +428,7 @@ func TestDefaultModels(t *testing.T) {
 	t.Parallel()
 
 	// Test that DefaultModels map has all expected providers
-	expectedProviders := []string{"openai", "anthropic", "google", "dmr", "mistral", "openrouter", "baseten", "ovhcloud", "groq", "fireworks", "deepseek", "cerebras", "together", "amazon-bedrock", "opencode-zen", "opencode-go"}
+	expectedProviders := []string{"openai", "anthropic", "google", "dmr", "mistral", "openrouter", "baseten", "ovhcloud", "groq", "fireworks", "deepseek", "cerebras", "together", "huggingface", "amazon-bedrock", "opencode-zen", "opencode-go"}
 
 	for _, provider := range expectedProviders {
 		t.Run(provider, func(t *testing.T) {
@@ -436,6 +452,7 @@ func TestDefaultModels(t *testing.T) {
 	assert.Equal(t, "deepseek-chat", DefaultModels["deepseek"])
 	assert.Equal(t, "gpt-oss-120b", DefaultModels["cerebras"])
 	assert.Equal(t, "meta-llama/Llama-3.3-70B-Instruct-Turbo", DefaultModels["together"])
+	assert.Equal(t, "meta-llama/Llama-3.3-70B-Instruct", DefaultModels["huggingface"])
 	assert.Equal(t, "global.anthropic.claude-sonnet-4-5-20250929-v1:0", DefaultModels["amazon-bedrock"])
 	assert.Equal(t, "deepseek-v4-flash", DefaultModels["opencode-go"])
 	assert.Equal(t, "deepseek-v4-flash-free", DefaultModels["opencode-zen"])
@@ -445,7 +462,7 @@ func TestAutoModelConfig_IntegrationWithDefaultModels(t *testing.T) {
 	t.Parallel()
 
 	// Verify that AutoModelConfig always returns a model from DefaultModels
-	providers := []string{"openai", "anthropic", "google", "mistral", "openrouter", "baseten", "ovhcloud", "groq", "fireworks", "deepseek", "cerebras", "together", "opencode-zen"}
+	providers := []string{"openai", "anthropic", "google", "mistral", "openrouter", "baseten", "ovhcloud", "groq", "fireworks", "deepseek", "cerebras", "together", "huggingface", "opencode-zen"}
 
 	for _, provider := range providers {
 		t.Run(provider, func(t *testing.T) {
@@ -479,6 +496,8 @@ func TestAutoModelConfig_IntegrationWithDefaultModels(t *testing.T) {
 				envVars["CEREBRAS_API_KEY"] = "test-key"
 			case "together":
 				envVars["TOGETHER_API_KEY"] = "test-key"
+			case "huggingface":
+				envVars["HF_TOKEN"] = "test-token"
 			case "opencode-zen":
 				envVars["OPENCODE_API_KEY"] = "test-key"
 			}
@@ -632,13 +651,21 @@ func TestAvailableProviders_PrecedenceOrder(t *testing.T) {
 	providers = AvailableProviders(t.Context(), "", env)
 	assert.Equal(t, "cerebras", providers[0])
 
-	// together wins over amazon-bedrock
+	// together wins over huggingface
 	env = environment.NewMapEnvProvider(map[string]string{
-		"TOGETHER_API_KEY":  "test-key",
-		"AWS_ACCESS_KEY_ID": "test-key",
+		"TOGETHER_API_KEY": "test-key",
+		"HF_TOKEN":         "test-token",
 	})
 	providers = AvailableProviders(t.Context(), "", env)
 	assert.Equal(t, "together", providers[0])
+
+	// huggingface wins over amazon-bedrock
+	env = environment.NewMapEnvProvider(map[string]string{
+		"HF_TOKEN":          "test-token",
+		"AWS_ACCESS_KEY_ID": "test-key",
+	})
+	providers = AvailableProviders(t.Context(), "", env)
+	assert.Equal(t, "huggingface", providers[0])
 
 	// Only OPENCODE_API_KEY set - opencode-zen should win (higher priority than opencode-go)
 	env = environment.NewMapEnvProvider(map[string]string{
