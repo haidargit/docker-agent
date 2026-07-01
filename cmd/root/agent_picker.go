@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/viewport"
@@ -147,6 +148,12 @@ type agentPickerModel struct {
 	showDetails bool
 	details     viewport.Model
 	detailsBar  *scrollbar.Model
+
+	// lastClickIndex and lastClickTime back double-click detection on the
+	// agent cards: a second left-click on the same card within the threshold
+	// selects it.
+	lastClickIndex int
+	lastClickTime  time.Time
 }
 
 func newAgentPickerModel(choices []agentChoice) *agentPickerModel {
@@ -154,9 +161,10 @@ func newAgentPickerModel(choices []agentChoice) *agentPickerModel {
 	vp.FillHeight = true
 	vp.SoftWrap = true
 	return &agentPickerModel{
-		choices:    choices,
-		details:    vp,
-		detailsBar: scrollbar.New(),
+		choices:        choices,
+		details:        vp,
+		detailsBar:     scrollbar.New(),
+		lastClickIndex: -1,
 	}
 }
 
@@ -212,7 +220,48 @@ func (m *agentPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, agentPickerKeys.Choose):
 			return m, tea.Quit
 		}
+	case tea.MouseWheelMsg:
+		if m.showDetails {
+			var cmd tea.Cmd
+			m.details, cmd = m.details.Update(msg)
+			m.syncDetailsBar()
+			return m, cmd
+		}
+		return m, nil
+	case tea.MouseMotionMsg:
+		if !m.showDetails {
+			if i, ok := m.cardAt(msg.X, msg.Y); ok {
+				m.cursor = i
+			}
+		}
+		return m, nil
+	case tea.MouseClickMsg:
+		return m.handleMouseClick(msg)
 	}
+	return m, nil
+}
+
+// handleMouseClick moves the cursor to the clicked card and treats a second
+// left-click on the same card (within the double-click threshold) as a
+// selection. Clicks are ignored while the YAML dialog is open.
+func (m *agentPickerModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	if m.showDetails || msg.Button != tea.MouseLeft {
+		return m, nil
+	}
+	i, ok := m.cardAt(msg.X, msg.Y)
+	if !ok {
+		m.lastClickIndex = -1
+		return m, nil
+	}
+	m.cursor = i
+
+	now := time.Now()
+	if m.lastClickIndex == i && now.Sub(m.lastClickTime) < styles.DoubleClickThreshold {
+		m.lastClickIndex = -1
+		return m, tea.Quit
+	}
+	m.lastClickIndex = i
+	m.lastClickTime = now
 	return m, nil
 }
 
@@ -358,6 +407,7 @@ func (m *agentPickerModel) View() tea.View {
 
 	view := tea.NewView(centered)
 	view.AltScreen = true
+	view.MouseMode = tea.MouseModeAllMotion
 	view.BackgroundColor = styles.Background
 	view.WindowTitle = "Select an agent"
 	return view
@@ -367,6 +417,18 @@ func (m *agentPickerModel) View() tea.View {
 const (
 	agentPickerCardWidth    = 64
 	agentPickerMinCardWidth = 24
+
+	// agentPickerCardHeight is the rendered height of a card: 2 content rows
+	// (header + detail) wrapped by a top and bottom border.
+	agentPickerCardHeight = 4
+
+	// agentPickerCardsTop is the number of rows from the panel's top edge to
+	// the first card: border (1) + padding (1) + title (1) + subtitle (1) +
+	// blank separator (1).
+	agentPickerCardsTop = 5
+	// agentPickerCardsLeft is the number of columns from the panel's left
+	// edge to a card: border (1) + padding (3).
+	agentPickerCardsLeft = 4
 )
 
 // cardWidth returns the card width to use, shrinking to fit narrow terminals.
@@ -385,9 +447,33 @@ func (m *agentPickerModel) cardWidth() int {
 	return w
 }
 
+// cardAt maps terminal coordinates to the index of the agent card under them.
+// It mirrors the layout produced by render: the panel is centered, and cards
+// are stacked with no gaps below the title/subtitle. The bool is false when
+// the point is outside every card.
+func (m *agentPickerModel) cardAt(x, y int) (int, bool) {
+	// Measure the real panel so the hit zones track the rendered layout even
+	// when the subtitle or help line is wider than the cards.
+	panelWidth, panelHeight := lipgloss.Size(m.render())
+	originX := max((m.width-panelWidth)/2, 0)
+	originY := max((m.height-panelHeight)/2, 0)
+
+	cardWidth := m.cardWidth()
+	relX := x - originX - agentPickerCardsLeft
+	relY := y - originY - agentPickerCardsTop
+	if relX < 0 || relX >= cardWidth || relY < 0 {
+		return 0, false
+	}
+	i := relY / agentPickerCardHeight
+	if i >= len(m.choices) {
+		return 0, false
+	}
+	return i, true
+}
+
 func (m *agentPickerModel) render() string {
 	title := styles.HighlightWhiteStyle.Render("Choose an agent to run")
-	subtitle := styles.MutedStyle.Render("Pick the agent you want to start a session with.")
+	subtitle := styles.MutedStyle.Render("Pick the agent you want to start a session with, or double-click a card.")
 
 	cards := make([]string, 0, len(m.choices))
 	cardWidth := m.cardWidth()
@@ -399,6 +485,7 @@ func (m *agentPickerModel) render() string {
 	help := styles.MutedStyle.Render(
 		strings.Join([]string{
 			"↑↓ move",
+			"double-click select",
 			agentPickerKeys.Choose.Help().Key + " " + agentPickerKeys.Choose.Help().Desc,
 			agentPickerKeys.Details.Help().Key + " " + agentPickerKeys.Details.Help().Desc,
 			agentPickerKeys.Quit.Help().Key + " " + agentPickerKeys.Quit.Help().Desc,

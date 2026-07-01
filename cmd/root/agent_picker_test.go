@@ -5,7 +5,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
@@ -217,4 +219,120 @@ func TestAgentPickerModelNavigation(t *testing.T) {
 
 	m.moveUp()
 	assert.Equal(t, 0, m.cursor)
+}
+
+func TestAgentPickerCardAt(t *testing.T) {
+	t.Parallel()
+
+	m := newAgentPickerModel([]agentChoice{
+		{ref: "default", description: "first"},
+		{ref: "coder", description: "second"},
+	})
+	m.width = 120
+	m.height = 40
+
+	// A point far outside the panel hits nothing.
+	_, ok := m.cardAt(0, 0)
+	assert.False(t, ok)
+
+	// Find the coordinates of each card by scanning the whole grid and
+	// checking the reported index is stable and in range.
+	seen := map[int]bool{}
+	for y := range m.height {
+		for x := range m.width {
+			if i, ok := m.cardAt(x, y); ok {
+				assert.GreaterOrEqual(t, i, 0)
+				assert.Less(t, i, len(m.choices))
+				seen[i] = true
+			}
+		}
+	}
+	// Both cards must be reachable.
+	assert.True(t, seen[0])
+	assert.True(t, seen[1])
+}
+
+func TestAgentPickerMouseHoverSelects(t *testing.T) {
+	t.Parallel()
+
+	m := newAgentPickerModel([]agentChoice{
+		{ref: "default"},
+		{ref: "coder"},
+	})
+	m.width = 120
+	m.height = 40
+
+	x, y := firstCardPoint(t, m, 1)
+	_, _ = m.Update(tea.MouseMotionMsg{X: x, Y: y})
+	assert.Equal(t, 1, m.cursor, "hover should move the cursor to the hovered card")
+}
+
+func TestAgentPickerDoubleClickSelects(t *testing.T) {
+	t.Parallel()
+
+	m := newAgentPickerModel([]agentChoice{
+		{ref: "default"},
+		{ref: "coder"},
+	})
+	m.width = 120
+	m.height = 40
+
+	x, y := firstCardPoint(t, m, 1)
+	click := tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft}
+
+	// First click selects (moves cursor) but does not quit.
+	_, cmd := m.Update(click)
+	assert.Equal(t, 1, m.cursor)
+	assert.Nil(t, cmd, "single click must not quit")
+
+	// Second click on the same card within the threshold quits (selects).
+	_, cmd = m.Update(click)
+	assert.NotNil(t, cmd, "double click must quit")
+	assert.IsType(t, tea.QuitMsg{}, cmd())
+}
+
+func TestAgentPickerDoubleClickResetsAfterTimeout(t *testing.T) {
+	t.Parallel()
+
+	m := newAgentPickerModel([]agentChoice{{ref: "default"}, {ref: "coder"}})
+	m.width = 120
+	m.height = 40
+
+	x, y := firstCardPoint(t, m, 0)
+	click := tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft}
+
+	_, cmd := m.Update(click)
+	assert.Nil(t, cmd)
+
+	// Simulate the threshold elapsing: a stale first click can't complete a
+	// double-click, so the next click is treated as a fresh first click.
+	m.lastClickTime = time.Now().Add(-2 * time.Second)
+	_, cmd = m.Update(click)
+	assert.Nil(t, cmd, "click after the threshold must not quit")
+}
+
+func TestAgentPickerClickOutsideDoesNothing(t *testing.T) {
+	t.Parallel()
+
+	m := newAgentPickerModel([]agentChoice{{ref: "default"}, {ref: "coder"}})
+	m.width = 120
+	m.height = 40
+
+	_, cmd := m.Update(tea.MouseClickMsg{X: 0, Y: 0, Button: tea.MouseLeft})
+	assert.Nil(t, cmd)
+	assert.Equal(t, -1, m.lastClickIndex, "a miss resets double-click tracking")
+}
+
+// firstCardPoint scans the grid for a coordinate that maps to card index want.
+func firstCardPoint(t *testing.T, m *agentPickerModel, want int) (int, int) {
+	t.Helper()
+	for y := range m.height {
+		for x := range m.width {
+			if i, ok := m.cardAt(x, y); ok && i == want {
+				return x, y
+			}
+		}
+	}
+	t.Fatalf("no coordinate maps to card %d", want)
+	return 0, 0
 }
