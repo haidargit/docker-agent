@@ -78,6 +78,11 @@ var Aliases = map[string]Alias{
 		BaseURL:     "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
 		TokenEnvVar: "OVH_AI_ENDPOINTS_ACCESS_TOKEN",
 	},
+	"groq": {
+		APIType:     "openai",
+		BaseURL:     "https://api.groq.com/openai/v1",
+		TokenEnvVar: "GROQ_API_KEY",
+	},
 	"github-copilot": {
 		APIType:     "openai",
 		BaseURL:     "https://api.githubcopilot.com",

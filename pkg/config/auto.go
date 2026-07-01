@@ -46,6 +46,7 @@ var cloudProviders = []providerConfig{
 	{"openrouter", []string{"OPENROUTER_API_KEY"}, "OPENROUTER_API_KEY"},
 	{"baseten", []string{"BASETEN_API_KEY"}, "BASETEN_API_KEY"},
 	{"ovhcloud", []string{"OVH_AI_ENDPOINTS_ACCESS_TOKEN"}, "OVH_AI_ENDPOINTS_ACCESS_TOKEN"},
+	{"groq", []string{"GROQ_API_KEY"}, "GROQ_API_KEY"},
 	{"amazon-bedrock", []string{
 		"AWS_BEARER_TOKEN_BEDROCK",
 		"AWS_ACCESS_KEY_ID",
@@ -111,6 +112,7 @@ var DefaultModels = map[string]string{
 	"openrouter":     "meta-llama/llama-3.3-70b-instruct",
 	"baseten":        "deepseek-ai/DeepSeek-V3.1",
 	"ovhcloud":       "Qwen3.5-397B-A17B",
+	"groq":           "llama-3.3-70b-versatile",
 	"amazon-bedrock": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
 	"opencode-go":    "deepseek-v4-flash",
 	"opencode-zen":   "deepseek-v4-flash-free",

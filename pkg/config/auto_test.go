@@ -70,6 +70,13 @@ func TestAvailableProviders_NoGateway(t *testing.T) {
 			expectedProvider: "ovhcloud",
 		},
 		{
+			name: "groq api key present",
+			envVars: map[string]string{
+				"GROQ_API_KEY": "test-key",
+			},
+			expectedProvider: "groq",
+		},
+		{
 			name:             "no api keys - defaults to dmr",
 			envVars:          map[string]string{},
 			expectedProvider: "dmr",
@@ -250,6 +257,15 @@ func TestAutoModelConfig(t *testing.T) {
 			expectedMaxTokens: 32000,
 		},
 		{
+			name: "groq provider",
+			envVars: map[string]string{
+				"GROQ_API_KEY": "test-key",
+			},
+			expectedProvider:  "groq",
+			expectedModel:     "llama-3.3-70b-versatile",
+			expectedMaxTokens: 32000,
+		},
+		{
 			name:              "dmr provider (no api keys)",
 			envVars:           map[string]string{},
 			expectedProvider:  "dmr",
@@ -331,7 +347,7 @@ func TestDefaultModels(t *testing.T) {
 	t.Parallel()
 
 	// Test that DefaultModels map has all expected providers
-	expectedProviders := []string{"openai", "anthropic", "google", "dmr", "mistral", "openrouter", "baseten", "ovhcloud", "amazon-bedrock", "opencode-zen", "opencode-go"}
+	expectedProviders := []string{"openai", "anthropic", "google", "dmr", "mistral", "openrouter", "baseten", "ovhcloud", "groq", "amazon-bedrock", "opencode-zen", "opencode-go"}
 
 	for _, provider := range expectedProviders {
 		t.Run(provider, func(t *testing.T) {
@@ -350,6 +366,7 @@ func TestDefaultModels(t *testing.T) {
 	assert.Equal(t, "meta-llama/llama-3.3-70b-instruct", DefaultModels["openrouter"])
 	assert.Equal(t, "deepseek-ai/DeepSeek-V3.1", DefaultModels["baseten"])
 	assert.Equal(t, "Qwen3.5-397B-A17B", DefaultModels["ovhcloud"])
+	assert.Equal(t, "llama-3.3-70b-versatile", DefaultModels["groq"])
 	assert.Equal(t, "global.anthropic.claude-sonnet-4-5-20250929-v1:0", DefaultModels["amazon-bedrock"])
 	assert.Equal(t, "deepseek-v4-flash", DefaultModels["opencode-go"])
 	assert.Equal(t, "deepseek-v4-flash-free", DefaultModels["opencode-zen"])
@@ -359,7 +376,7 @@ func TestAutoModelConfig_IntegrationWithDefaultModels(t *testing.T) {
 	t.Parallel()
 
 	// Verify that AutoModelConfig always returns a model from DefaultModels
-	providers := []string{"openai", "anthropic", "google", "mistral", "openrouter", "baseten", "ovhcloud", "opencode-zen"}
+	providers := []string{"openai", "anthropic", "google", "mistral", "openrouter", "baseten", "ovhcloud", "groq", "opencode-zen"}
 
 	for _, provider := range providers {
 		t.Run(provider, func(t *testing.T) {
@@ -383,6 +400,8 @@ func TestAutoModelConfig_IntegrationWithDefaultModels(t *testing.T) {
 				envVars["BASETEN_API_KEY"] = "test-key"
 			case "ovhcloud":
 				envVars["OVH_AI_ENDPOINTS_ACCESS_TOKEN"] = "test-token"
+			case "groq":
+				envVars["GROQ_API_KEY"] = "test-key"
 			case "opencode-zen":
 				envVars["OPENCODE_API_KEY"] = "test-key"
 			}
@@ -496,13 +515,21 @@ func TestAvailableProviders_PrecedenceOrder(t *testing.T) {
 	providers = AvailableProviders(t.Context(), "", env)
 	assert.Equal(t, "baseten", providers[0])
 
-	// ovhcloud wins over amazon-bedrock
+	// ovhcloud wins over groq
 	env = environment.NewMapEnvProvider(map[string]string{
 		"OVH_AI_ENDPOINTS_ACCESS_TOKEN": "test-token",
-		"AWS_ACCESS_KEY_ID":             "test-key",
+		"GROQ_API_KEY":                  "test-key",
 	})
 	providers = AvailableProviders(t.Context(), "", env)
 	assert.Equal(t, "ovhcloud", providers[0])
+
+	// groq wins over amazon-bedrock
+	env = environment.NewMapEnvProvider(map[string]string{
+		"GROQ_API_KEY":      "test-key",
+		"AWS_ACCESS_KEY_ID": "test-key",
+	})
+	providers = AvailableProviders(t.Context(), "", env)
+	assert.Equal(t, "groq", providers[0])
 
 	// Only OPENCODE_API_KEY set - opencode-zen should win (higher priority than opencode-go)
 	env = environment.NewMapEnvProvider(map[string]string{
