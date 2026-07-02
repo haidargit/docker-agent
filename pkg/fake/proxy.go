@@ -23,7 +23,6 @@ import (
 	"gopkg.in/dnaeon/go-vcr.v4/pkg/cassette"
 	"gopkg.in/dnaeon/go-vcr.v4/pkg/recorder"
 
-	"github.com/docker/docker-agent/pkg/desktop"
 	"github.com/docker/docker-agent/pkg/environment"
 )
 
@@ -36,7 +35,9 @@ type ProxyOptions struct {
 	StreamChunkDelay time.Duration
 	// UpstreamGateway, when set, forwards requests to this models gateway
 	// instead of the provider's public endpoint. Used when recording a
-	// session that normally routes through a models gateway.
+	// session that normally routes through a models gateway. Only honored
+	// by the streaming recording path (StartRecordingProxy); the go-vcr
+	// replay path never forwards upstream.
 	UpstreamGateway string
 }
 
@@ -93,6 +94,13 @@ func StartStreamingRecordingProxy(
 	upstreamGateway string,
 	headerUpdater func(host string, req *http.Request),
 ) (string, func() error, error) {
+	// Fail fast on a bad gateway URL instead of returning 500s per request.
+	if upstreamGateway != "" {
+		if u, err := url.Parse(upstreamGateway); err != nil || u.Scheme == "" || u.Host == "" {
+			return "", nil, fmt.Errorf("invalid upstream gateway URL %q", upstreamGateway)
+		}
+	}
+
 	streamRec, err := NewStreamingRecorder(cassettePath)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create streaming recorder: %w", err)
@@ -167,24 +175,23 @@ func envAPIKeyForHost(host string) string {
 }
 
 // gatewayAuthHeaderUpdater re-authenticates requests forwarded to a models
-// gateway. The client authenticated against the localhost proxy URL — which
-// the Docker trust check matches — so it may have attached a Desktop token
-// instead of the credentials it would send to the real gateway.
+// gateway. The client authenticated against the localhost proxy URL, which
+// passes the same Docker trust check a trusted gateway does, so it attached
+// a fresh Desktop token to every request.
 func gatewayAuthHeaderUpdater(gateway string) func(host string, req *http.Request) {
 	if environment.IsTrustedDockerURL(gateway) {
-		return func(_ string, req *http.Request) {
-			if token := desktop.GetToken(req.Context()); token != "" {
-				// Same headers gateway-mode provider clients set (Authorization
-				// for OpenAI-style, X-Api-Key for Anthropic-style).
-				req.Header.Set("Authorization", "Bearer "+token)
-				req.Header.Set("X-Api-Key", token)
-			}
-		}
+		// The Desktop token the client attached is exactly what the gateway
+		// expects (localhost gateways are equally trusted in normal mode).
+		return func(string, *http.Request) {}
 	}
-	// Custom gateways authenticate with the provider env keys the client
-	// would use when talking to them directly. Only re-apply when a key is
-	// configured; otherwise keep whatever the client attached.
+	// Non-Docker gateways must never see the Desktop token. Strip the
+	// credential headers the client set and re-apply the provider env key
+	// it would have sent to the gateway directly (SDKs default to env keys
+	// when no gateway token is available).
 	return func(host string, req *http.Request) {
+		req.Header.Del("Authorization")
+		req.Header.Del("X-Api-Key")
+		req.Header.Del("X-Goog-Api-Key")
 		if envAPIKeyForHost(host) != "" {
 			APIKeyHeaderUpdater(host, req)
 		}
@@ -357,16 +364,17 @@ func TargetURLForHost(host string) func(req *http.Request) string {
 // GatewayTargetURL rewrites an incoming proxy request to target the upstream
 // models gateway, appending the request path to the gateway's path and
 // merging the gateway's own query parameters (e.g. plan tiers) with the
-// request's.
+// request's. Both query sets are kept side by side, matching how gateway-mode
+// clients merge them (httpclient.WithQuery uses Add too).
 func GatewayTargetURL(gateway string, req *http.Request) (string, error) {
 	base, err := url.Parse(strings.TrimSuffix(gateway, "/"))
 	if err != nil {
-		return "", fmt.Errorf("invalid gateway URL %q: %w", gateway, err)
+		return "", errors.New("invalid upstream gateway URL")
 	}
 
 	target := *base
-	target.Path += req.URL.Path
-	target.RawPath = ""
+	target.Path = base.Path + req.URL.Path
+	target.RawPath = base.EscapedPath() + req.URL.EscapedPath()
 
 	query := base.Query()
 	for k, vs := range req.URL.Query() {
@@ -402,9 +410,18 @@ func Handle(transport http.RoundTripper, headerUpdater func(host string, req *ht
 				return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 			}
 			// Record the canonical provider URL (what a gateway-less replay
-			// proxy would compute) so the cassette stays replayable.
+			// proxy would compute) so the cassette stays replayable and never
+			// contains the gateway URL, whose query may carry secrets.
 			if toTargetURL != nil {
 				recordURL = toTargetURL(c.Request())
+			} else {
+				hostURL, err := url.Parse(host)
+				if err != nil || hostURL.Scheme == "" || hostURL.Host == "" {
+					return echo.NewHTTPError(http.StatusBadRequest, "unknown service host "+host)
+				}
+				// Same shape as the TargetURLForHost builders: provider
+				// origin + request URI.
+				recordURL = hostURL.Scheme + "://" + hostURL.Host + c.Request().URL.Redacted()
 			}
 		} else {
 			if toTargetURL == nil {
@@ -435,7 +452,9 @@ func Handle(transport http.RoundTripper, headerUpdater func(host string, req *ht
 
 		resp, err := client.Do(req)
 		if err != nil {
-			slog.ErrorContext(ctx, "VCR proxy request failed", "url", targetURL, "error", err)
+			// Log host+path only: in gateway mode the full target URL may
+			// carry credentials in its query string.
+			slog.ErrorContext(ctx, "VCR proxy request failed", "url", req.URL.Scheme+"://"+req.URL.Host+req.URL.Path, "error", err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to run request: "+err.Error())
 		}
 		defer resp.Body.Close()
