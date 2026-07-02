@@ -2603,15 +2603,27 @@ func (m *appModel) cleanupAll() {
 	for _, ed := range m.editors {
 		ed.Cleanup()
 	}
-	m.cleanupManagedResources()
+
+	// Shut down managed resources (supervisor, TUI state store) in the
+	// background: supervisor.Shutdown stops every session's toolsets, which
+	// can block indefinitely (e.g. an MCP toolset wedged behind a broken
+	// Docker daemon). Running it synchronously here would freeze the Update
+	// loop before tea.Quit is ever returned, leaving the exit confirmation
+	// apparently ignored.
+	cleanupDone := make(chan struct{})
+	go func() {
+		defer close(cleanupDone)
+		m.cleanupManagedResources()
+	}()
 
 	// Safety net: bubbletea's renderer can deadlock on shutdown if stdout
 	// is wedged — the final flush re-acquires the mutex that the still
-	// blocked previous flush is holding. Race Wait() against a deadline
-	// and force-exit if shutdown stalls. Snapshot the package globals so
-	// they can't race with t.Cleanup. Clear m.program so subsequent calls
-	// to cleanupAll (e.g. ExitSessionMsg followed by ExitConfirmedMsg) are
-	// no-ops and don't spawn parallel safety nets that would each call exit.
+	// blocked previous flush is holding — and the resource cleanup above can
+	// likewise stall forever. Race both against a deadline and force-exit if
+	// shutdown stalls. Snapshot the package globals so they can't race with
+	// t.Cleanup. Clear m.program so subsequent calls to cleanupAll (e.g.
+	// ExitSessionMsg followed by ExitConfirmedMsg) are no-ops and don't spawn
+	// parallel safety nets that would each call exit.
 	program := m.program
 	if program == nil {
 		return
@@ -2626,14 +2638,18 @@ func (m *appModel) cleanupAll() {
 			close(done)
 		}()
 
-		select {
-		case <-done:
-		case <-time.After(timeout):
-			slog.Warn("Graceful shutdown timed out, forcing exit")
-			// ReleaseTerminal grabs the same mutex that's stuck, so
-			// fire-and-forget; exit either way.
-			go func() { _ = program.ReleaseTerminal() }()
-			exit(0)
+		deadline := time.After(timeout)
+		for _, ch := range []<-chan struct{}{done, cleanupDone} {
+			select {
+			case <-ch:
+			case <-deadline:
+				slog.Warn("Graceful shutdown timed out, forcing exit")
+				// ReleaseTerminal grabs the same mutex that's stuck, so
+				// fire-and-forget; exit either way.
+				go func() { _ = program.ReleaseTerminal() }()
+				exit(0)
+				return
+			}
 		}
 	}()
 }

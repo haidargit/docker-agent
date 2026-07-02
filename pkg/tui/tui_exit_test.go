@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/docker/docker-agent/pkg/session"
 	"github.com/docker/docker-agent/pkg/tui/components/completion"
 	"github.com/docker/docker-agent/pkg/tui/components/editor"
 	"github.com/docker/docker-agent/pkg/tui/components/notification"
@@ -23,6 +24,7 @@ import (
 	"github.com/docker/docker-agent/pkg/tui/messages"
 	"github.com/docker/docker-agent/pkg/tui/page/chat"
 	"github.com/docker/docker-agent/pkg/tui/service"
+	"github.com/docker/docker-agent/pkg/tui/service/supervisor"
 )
 
 // mockChatPage implements chat.Page for testing.
@@ -399,6 +401,65 @@ func TestCleanupAll_GracefulShutdownSkipsExit(t *testing.T) {
 
 // syncMsg pings the program's event loop to confirm Run() has started.
 type syncMsg struct{}
+
+// TestCleanupAll_WedgedResourceCleanupForcesExit: supervisor shutdown can
+// block indefinitely (e.g. a toolset Stop wedged behind a broken Docker
+// daemon). cleanupAll must not run it synchronously — that would freeze the
+// Update loop before tea.Quit is ever processed, so confirming the exit
+// dialog would appear to do nothing — and the safety net must force the exit
+// when the cleanup never completes.
+func TestCleanupAll_WedgedResourceCleanupForcesExit(t *testing.T) {
+	t.Parallel()
+
+	m, _ := newTestModel(t)
+	m.shutdownTimeout = 200 * time.Millisecond
+
+	exitDone := make(chan struct{})
+	m.exitFunc = func(int) { close(exitDone) }
+
+	// A session whose cleanup blocks forever, as a wedged toolset Stop would.
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	sv := supervisor.New(nil)
+	sv.AddSession(t.Context(), nil, session.New(), t.TempDir(), func() { <-release })
+	m.supervisor = sv
+
+	var in, out bytes.Buffer
+	p := tea.NewProgram(&quitModel{},
+		tea.WithContext(t.Context()),
+		tea.WithInput(&in),
+		tea.WithOutput(&out),
+	)
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		_, _ = p.Run()
+	}()
+	p.Send(syncMsg{})
+
+	m.program = p
+
+	// cleanupAll must return promptly even though the supervisor cleanup is
+	// wedged — it runs from the Update loop, right before tea.Quit.
+	returned := make(chan struct{})
+	go func() {
+		m.cleanupAll()
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cleanupAll blocked on the wedged resource cleanup")
+	}
+
+	p.Send(triggerQuitMsg{})
+
+	select {
+	case <-exitDone:
+	case <-time.After(m.shutdownTimeout + 2*time.Second):
+		t.Fatal("exitFunc was not called — a wedged resource cleanup must force exit")
+	}
+}
 
 // TestCleanupAll_NilProgramIsSafe: with no program wired, cleanupAll is a
 // no-op and exitFunc is never called.
