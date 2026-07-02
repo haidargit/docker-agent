@@ -32,6 +32,56 @@ function toggleTheme() {
   }
 }
 
+// ---------- GFM alerts ----------
+// Docs source uses portable GitHub-style alerts (> [!NOTE] etc.) so the
+// same Markdown renders on docs.docker.com (Hugo) and here. kramdown
+// leaves them as plain blockquotes, so we upgrade them client-side into
+// the existing .callout markup. Nodes are moved (never innerHTML'd) so
+// authored text is never reinterpreted as markup.
+const ALERT_STYLES = {
+  NOTE:      { cls: 'callout-info',    label: 'Note' },
+  TIP:       { cls: 'callout-tip',     label: 'Tip' },
+  IMPORTANT: { cls: 'callout-info',    label: 'Important' },
+  WARNING:   { cls: 'callout-warning', label: 'Warning' },
+  CAUTION:   { cls: 'callout-warning', label: 'Caution' },
+};
+
+function transformAlerts() {
+  if (!$content) return;
+  $content.querySelectorAll('blockquote').forEach(bq => {
+    const first = bq.firstElementChild;
+    if (!first || first.tagName !== 'P') return;
+    const textNode = first.firstChild;
+    if (!textNode || textNode.nodeType !== Node.TEXT_NODE) return;
+    const m = textNode.nodeValue.match(/^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/);
+    if (!m) return;
+
+    const style = ALERT_STYLES[m[1]];
+    textNode.nodeValue = textNode.nodeValue.slice(m[0].length);
+
+    const callout = document.createElement('div');
+    callout.className = 'callout ' + style.cls;
+    const title = document.createElement('div');
+    title.className = 'callout-title';
+
+    // A <strong> that is the sole content of the marker paragraph is a
+    // custom title (authored as "> [!TIP]\n> **Title**").
+    const strong = first.firstElementChild;
+    if (strong && strong.tagName === 'STRONG' &&
+        first.textContent.trim() === strong.textContent.trim()) {
+      while (strong.firstChild) title.appendChild(strong.firstChild);
+      first.remove();
+    } else {
+      title.textContent = style.label;
+      if (first.textContent.trim() === '') first.remove();
+    }
+
+    callout.appendChild(title);
+    while (bq.firstChild) callout.appendChild(bq.firstChild);
+    bq.replaceWith(callout);
+  });
+}
+
 // ---------- Table of Contents ----------
 // The right-column aside on each page contains:
 //   1. An "Edit this page" link to the source on GitHub (resolved
@@ -314,6 +364,7 @@ function bindButtons() {
 
 // ---------- Init ----------
 initTheme();
+transformAlerts();
 restoreSidebarScroll();
 buildSearchIndex();
 buildTOC();
