@@ -1327,14 +1327,14 @@
         },
         "env": {
           "type": "object",
-          "description": "Environment variables to add or override for this hook only.",
+          "description": "Environment variables to add or override for this hook only. Values expand the plain ${env.VAR} form from the OS environment; any other $ is kept literal.",
           "additionalProperties": {
             "type": "string"
           }
         },
         "working_dir": {
           "type": "string",
-          "description": "Working directory for this hook. Relative paths are resolved from the agent working directory."
+          "description": "Working directory for this hook. Accepts ~, $VAR, ${VAR} and ${env.VAR}. Relative paths are resolved from the agent working directory."
         },
         "on_error": {
           "type": "string",
@@ -2453,14 +2453,14 @@
         },
         "env": {
           "type": "object",
-          "description": "Environment variables for the command",
+          "description": "Environment variables for the command, layered over the toolset-level env. Values expand the plain ${env.VAR} form from the OS environment; any other $ is kept literal. Keys must not collide with args.",
           "additionalProperties": {
             "type": "string"
           }
         },
         "working_dir": {
           "type": "string",
-          "description": "Working directory for the command"
+          "description": "Working directory for the command. Accepts ~, $VAR, ${VAR} and ${env.VAR}."
         }
       },
       "additionalProperties": false

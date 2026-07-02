@@ -3,13 +3,16 @@ package shell
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/docker/docker-agent/pkg/config"
 	"github.com/docker/docker-agent/pkg/config/latest"
+	"github.com/docker/docker-agent/pkg/environment"
 	"github.com/docker/docker-agent/pkg/tools"
 )
 
@@ -101,6 +104,38 @@ func TestNewScript_Typo(t *testing.T) {
 	tool, err := NewScript(shellTools, nil)
 	require.Nil(t, tool)
 	require.ErrorContains(t, err, "tool 'docker_images' uses undefined args: [image]")
+}
+
+func TestNewScript_JSEnvRefInCmd(t *testing.T) {
+	t.Parallel()
+	shellTools := map[string]latest.ScriptShellToolConfig{
+		"deploy": {
+			Cmd: "deploy --token ${env.TOKEN}",
+		},
+	}
+
+	tool, err := NewScript(shellTools, nil)
+	require.Nil(t, tool)
+	require.ErrorContains(t, err, "uses ${env.TOKEN} in cmd")
+	require.ErrorContains(t, err, `env: {TOKEN: "${env.TOKEN}"}`)
+}
+
+func TestNewScript_ArgEnvCollision(t *testing.T) {
+	t.Parallel()
+	shellTools := map[string]latest.ScriptShellToolConfig{
+		"greet": {
+			Cmd: "echo $name",
+			Args: map[string]any{
+				"name": map[string]any{"type": "string"},
+			},
+			Required: []string{"name"},
+			Env:      map[string]string{"name": "static"},
+		},
+	}
+
+	tool, err := NewScript(shellTools, nil)
+	require.Nil(t, tool)
+	require.ErrorContains(t, err, "declares 'name' both in args and env")
 }
 
 func TestNewScript_MissingRequired(t *testing.T) {
@@ -198,6 +233,122 @@ func TestScriptShellTool_DropsUndeclaredArgs(t *testing.T) {
 	assert.False(t, result.IsError, "unexpected error: %s", result.Output)
 	assert.Contains(t, result.Output, "name=alice")
 	assert.NotContains(t, result.Output, "LD_PRELOAD")
+}
+
+func TestScriptShellTool_PerToolEnvAndWorkingDir(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv("SCRIPT_TEST_TOKEN", "tok")
+	t.Setenv("SCRIPT_TEST_DIR", workDir)
+
+	shellTools := map[string]latest.ScriptShellToolConfig{
+		"show_env": {
+			Cmd: `printf '%s|%s|%s' "$TOOL_VALUE" "$TOOL_LITERAL" "$(pwd)"`,
+			Env: map[string]string{
+				// Plain ${env.X} expands; $X stays literal (issue #2615).
+				"TOOL_VALUE":   "v-${env.SCRIPT_TEST_TOKEN}",
+				"TOOL_LITERAL": "pa$$word",
+			},
+			WorkingDir: "${env.SCRIPT_TEST_DIR}",
+		},
+	}
+
+	tool, err := NewScript(shellTools, nil)
+	require.NoError(t, err)
+
+	allTools, err := tool.Tools(t.Context())
+	require.NoError(t, err)
+	require.Len(t, allTools, 1)
+
+	result, err := allTools[0].Handler(t.Context(), tools.ToolCall{
+		Function: tools.FunctionCall{Arguments: `{}`},
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError, "unexpected error: %s", result.Output)
+
+	parts := strings.Split(result.Output, "|")
+	require.Len(t, parts, 3)
+	assert.Equal(t, "v-tok", parts[0])
+	assert.Equal(t, "pa$$word", parts[1])
+	got, err := filepath.EvalSymlinks(parts[2])
+	require.NoError(t, err)
+	want, err := filepath.EvalSymlinks(workDir)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+// TestCreateScriptToolSet_EnvPrecedence pins the effective env layering on
+// the production path: declared args > per-tool env > toolset env > OS env.
+func TestCreateScriptToolSet_EnvPrecedence(t *testing.T) {
+	t.Setenv("SCRIPT_PREC_OS", "from-os")
+	t.Setenv("SCRIPT_PREC_TOOLSET", "from-os")
+	t.Setenv("SCRIPT_PREC_TOOL", "from-os")
+	t.Setenv("SCRIPT_PREC_ARG", "from-os")
+
+	toolset := latest.Toolset{
+		Type: "script",
+		Env: map[string]string{
+			"SCRIPT_PREC_TOOLSET": "from-toolset",
+			"SCRIPT_PREC_TOOL":    "from-toolset",
+			"SCRIPT_PREC_ARG":     "from-toolset",
+		},
+		Shell: map[string]latest.ScriptShellToolConfig{
+			"show_env": {
+				Cmd: "env",
+				Env: map[string]string{
+					"SCRIPT_PREC_TOOL": "from-tool",
+				},
+				Args: map[string]any{
+					"SCRIPT_PREC_ARG": map[string]any{"type": "string"},
+				},
+				Required: []string{"SCRIPT_PREC_ARG"},
+			},
+		},
+	}
+
+	tool, err := CreateScriptToolSet(t.Context(), toolset, &config.RuntimeConfig{
+		EnvProviderForTests: environment.NewOsEnvProvider(),
+	})
+	require.NoError(t, err)
+
+	allTools, err := tool.Tools(t.Context())
+	require.NoError(t, err)
+	require.Len(t, allTools, 1)
+
+	result, err := allTools[0].Handler(t.Context(), tools.ToolCall{
+		Function: tools.FunctionCall{Arguments: `{"SCRIPT_PREC_ARG": "from-arg"}`},
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError, "unexpected error: %s", result.Output)
+	// `env` prints the spawned process's effective environment, i.e. what
+	// exec.Cmd kept after last-wins dedup.
+	assert.Contains(t, result.Output, "SCRIPT_PREC_OS=from-os\n")
+	assert.Contains(t, result.Output, "SCRIPT_PREC_TOOLSET=from-toolset\n")
+	assert.Contains(t, result.Output, "SCRIPT_PREC_TOOL=from-tool\n")
+	assert.Contains(t, result.Output, "SCRIPT_PREC_ARG=from-arg\n")
+}
+
+func TestScriptShellTool_PerToolEnvOverridesToolsetEnv(t *testing.T) {
+	t.Parallel()
+	shellTools := map[string]latest.ScriptShellToolConfig{
+		"show_env": {
+			Cmd: `printf '%s' "$SHARED"`,
+			Env: map[string]string{"SHARED": "per-tool"},
+		},
+	}
+
+	tool, err := NewScript(shellTools, []string{"SHARED=toolset"})
+	require.NoError(t, err)
+
+	allTools, err := tool.Tools(t.Context())
+	require.NoError(t, err)
+	require.Len(t, allTools, 1)
+
+	result, err := allTools[0].Handler(t.Context(), tools.ToolCall{
+		Function: tools.FunctionCall{Arguments: `{}`},
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError, "unexpected error: %s", result.Output)
+	assert.Equal(t, "per-tool", result.Output)
 }
 
 func TestScriptShellTool_RejectsNULInValue(t *testing.T) {
