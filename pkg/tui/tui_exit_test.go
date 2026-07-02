@@ -402,6 +402,45 @@ func TestCleanupAll_GracefulShutdownSkipsExit(t *testing.T) {
 // syncMsg pings the program's event loop to confirm Run() has started.
 type syncMsg struct{}
 
+// TestCleanupAll_RepeatCallsDoNotStackOnWedgedCleanup: once the first
+// cleanupAll has kicked off a (possibly wedged) resource cleanup, later calls
+// must be complete no-ops — they must not spawn more goroutines that pile up
+// behind the wedged sync.Once inside cleanupManagedResources.
+func TestCleanupAll_RepeatCallsDoNotStackOnWedgedCleanup(t *testing.T) {
+	t.Parallel()
+
+	m, _ := newTestModel(t)
+	m.shutdownTimeout = 100 * time.Millisecond
+	m.exitFunc = func(int) {}
+
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	var cleanupCalls atomic.Int32
+	sv := supervisor.New(nil)
+	sv.AddSession(t.Context(), nil, session.New(), t.TempDir(), func() {
+		cleanupCalls.Add(1)
+		<-release
+	})
+	m.supervisor = sv
+
+	// All calls must return promptly, and only the first may start a cleanup.
+	for range 3 {
+		returned := make(chan struct{})
+		go func() {
+			m.cleanupAll()
+			close(returned)
+		}()
+		select {
+		case <-returned:
+		case <-time.After(2 * time.Second):
+			t.Fatal("cleanupAll blocked on the wedged resource cleanup")
+		}
+	}
+
+	assert.LessOrEqual(t, cleanupCalls.Load(), int32(1),
+		"repeat cleanupAll calls must not start additional resource cleanups")
+}
+
 // TestCleanupAll_WedgedResourceCleanupForcesExit: supervisor shutdown can
 // block indefinitely (e.g. a toolset Stop wedged behind a broken Docker
 // daemon). cleanupAll must not run it synchronously — that would freeze the

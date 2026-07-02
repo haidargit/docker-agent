@@ -69,6 +69,12 @@ type appModel struct {
 	shutdownDone <-chan struct{}
 	cleanupOnce  sync.Once
 
+	// cleanupAllOnce guards the full cleanupAll shutdown sequence so repeat
+	// invocations (ExitSessionMsg followed by ExitConfirmedMsg, …) are no-ops:
+	// they must not stack goroutines behind a wedged cleanup or arm parallel
+	// safety nets that would each call exit.
+	cleanupAllOnce sync.Once
+
 	// exitFunc and shutdownTimeout override the shutdown safety net's
 	// behaviour. Both are zero by default and resolved through
 	// exitFn()/shutdownTimeoutOrDefault(), which fall back to the package
@@ -2596,62 +2602,68 @@ func (m *appModel) cleanupManagedResources() {
 	})
 }
 
-// cleanupAll cleans up all sessions, editors, and resources.
+// cleanupAll cleans up all sessions, editors, and resources. It is invoked
+// from several message handlers (ExitSessionMsg, ExitConfirmedMsg, …) and may
+// be called more than once on the same model; the entire shutdown sequence is
+// once-guarded so repeat calls are no-ops and cannot pile up goroutines on a
+// wedged cleanup or arm parallel safety nets.
 func (m *appModel) cleanupAll() {
-	m.transcriber.Stop()
-	m.closeTranscriptCh()
-	for _, ed := range m.editors {
-		ed.Cleanup()
-	}
+	m.cleanupAllOnce.Do(func() {
+		m.transcriber.Stop()
+		m.closeTranscriptCh()
+		for _, ed := range m.editors {
+			ed.Cleanup()
+		}
 
-	// Shut down managed resources (supervisor, TUI state store) in the
-	// background: supervisor.Shutdown stops every session's toolsets, which
-	// can block indefinitely (e.g. an MCP toolset wedged behind a broken
-	// Docker daemon). Running it synchronously here would freeze the Update
-	// loop before tea.Quit is ever returned, leaving the exit confirmation
-	// apparently ignored.
-	cleanupDone := make(chan struct{})
-	go func() {
-		defer close(cleanupDone)
-		m.cleanupManagedResources()
-	}()
-
-	// Safety net: bubbletea's renderer can deadlock on shutdown if stdout
-	// is wedged — the final flush re-acquires the mutex that the still
-	// blocked previous flush is holding — and the resource cleanup above can
-	// likewise stall forever. Race both against a deadline and force-exit if
-	// shutdown stalls. Snapshot the package globals so they can't race with
-	// t.Cleanup. Clear m.program so subsequent calls to cleanupAll (e.g.
-	// ExitSessionMsg followed by ExitConfirmedMsg) are no-ops and don't spawn
-	// parallel safety nets that would each call exit.
-	program := m.program
-	if program == nil {
-		return
-	}
-	m.program = nil
-	timeout := m.shutdownTimeoutOrDefault()
-	exit := m.exitFn()
-	go func() {
-		done := make(chan struct{})
+		// Shut down managed resources (supervisor, TUI state store) in the
+		// background: supervisor.Shutdown stops every session's toolsets, which
+		// can block indefinitely (e.g. an MCP toolset wedged behind a broken
+		// Docker daemon). Running it synchronously here would freeze the Update
+		// loop before tea.Quit is ever returned, leaving the exit confirmation
+		// apparently ignored.
+		cleanupDone := make(chan struct{})
 		go func() {
-			program.Wait()
-			close(done)
+			defer close(cleanupDone)
+			m.cleanupManagedResources()
 		}()
 
-		deadline := time.After(timeout)
-		for _, ch := range []<-chan struct{}{done, cleanupDone} {
-			select {
-			case <-ch:
-			case <-deadline:
-				slog.Warn("Graceful shutdown timed out, forcing exit")
-				// ReleaseTerminal grabs the same mutex that's stuck, so
-				// fire-and-forget; exit either way.
-				go func() { _ = program.ReleaseTerminal() }()
-				exit(0)
-				return
-			}
+		// Safety net: bubbletea's renderer can deadlock on shutdown if stdout
+		// is wedged — the final flush re-acquires the mutex that the still
+		// blocked previous flush is holding — and the resource cleanup above can
+		// likewise stall forever. Race both against a deadline and force-exit if
+		// shutdown stalls. Snapshot the program and package globals so they
+		// can't race with t.Cleanup. Without a program (tests, exit before
+		// SetProgram) there is no renderer to deadlock and no UI left to
+		// unblock, so no safety net is armed; the background cleanup still runs.
+		program := m.program
+		if program == nil {
+			return
 		}
-	}()
+		m.program = nil
+		timeout := m.shutdownTimeoutOrDefault()
+		exit := m.exitFn()
+		go func() {
+			done := make(chan struct{})
+			go func() {
+				program.Wait()
+				close(done)
+			}()
+
+			deadline := time.After(timeout)
+			for _, ch := range []<-chan struct{}{done, cleanupDone} {
+				select {
+				case <-ch:
+				case <-deadline:
+					slog.Warn("Graceful shutdown timed out, forcing exit")
+					// ReleaseTerminal grabs the same mutex that's stuck, so
+					// fire-and-forget; exit either way.
+					go func() { _ = program.ReleaseTerminal() }()
+					exit(0)
+					return
+				}
+			}
+		}()
+	})
 }
 
 // openExternalEditor opens the current editor content in an external editor.

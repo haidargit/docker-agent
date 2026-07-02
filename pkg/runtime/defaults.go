@@ -50,7 +50,8 @@ const defaultToolListTimeout = 10 * time.Second
 // the loop the same way a hung Tools() does: the terminal
 // ToolsetInfo{Loading:false} event is never emitted and the sidebar animates
 // "tools available…" forever. A timed-out toolset is skipped for this startup
-// pass only; the run loop retries Start on the first user message. It is
-// longer than defaultToolListTimeout because a cold start can legitimately
-// include an image pull. Tests override it via WithToolStartTimeout.
+// pass only — the original start attempt keeps running and the toolset is
+// picked up once it completes. It is longer than defaultToolListTimeout
+// because a cold start can legitimately include an image pull. Tests override
+// it via WithToolStartTimeout.
 const defaultToolStartTimeout = 30 * time.Second

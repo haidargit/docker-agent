@@ -1591,7 +1591,7 @@ func (r *LocalRuntime) emitToolsProgressively(ctx context.Context, a *agent.Agen
 				if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 					slog.WarnContext(ctx, "Toolset start timed out; skipping",
 						"agent", a.Name(), "toolset", desc, "timeout", r.toolStartTimeout)
-					a.AddToolWarning(fmt.Sprintf("%s is taking too long to start (>%s) — it will be retried on your next message", desc, r.toolStartTimeout))
+					a.AddToolWarning(fmt.Sprintf("%s is taking too long to start (>%s) — it keeps starting in the background and its tools appear once it is ready", desc, r.toolStartTimeout))
 					continue
 				}
 				// IsAuthorizationRequired must be checked BEFORE
@@ -1706,6 +1706,12 @@ func listToolsWithTimeout(ctx context.Context, toolset tools.ToolSet, timeout ti
 // ctx deadline and block startup forever. On timeout it returns the context
 // error; the orphaned goroutine sends into a buffered channel and exits if the
 // call ever returns.
+//
+// The abandoned goroutine keeps holding the StartableToolSet's single-flight
+// lock, so later Start/Stop calls on the same toolset wait for the original
+// attempt rather than racing it — if it eventually completes, the toolset
+// becomes usable on the next turn; if it never does, the TUI shutdown safety
+// net still bounds the exit path.
 func startToolsetWithTimeout(ctx context.Context, toolset *tools.StartableToolSet, timeout time.Duration) error {
 	if timeout <= 0 {
 		timeout = defaultToolStartTimeout
