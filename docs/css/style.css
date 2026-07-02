@@ -798,14 +798,30 @@ details.sidebar-section[open] > summary.sidebar-heading::after {
   color: var(--text-secondary);
 }
 
+/* ===== Preview banner =====
+ * github.io tracks main and may document unreleased features; the
+ * banner points readers at the stable docs on docs.docker.com. */
+.preview-banner {
+  margin-bottom: 24px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+.preview-banner a { color: var(--accent); }
+
 /* ===== Callouts / Admonitions =====
  * docs.docker.com-style: rounded panel with a filled, circular icon
- * badge in the upper-left and a strong title. Authors keep using the
- * existing Markdown:
- *   <div class="callout callout-tip" markdown="1">
- *   <div class="callout-title">…</div>
- *   <p>…</p>
- *   </div>
+ * badge in the upper-left and a strong title. Authored as portable
+ * GFM alerts in Markdown:
+ *   > [!TIP]
+ *   > **Optional title**
+ *   >
+ *   > Body text.
+ * js/app.js upgrades the rendered blockquotes into this markup.
  */
 .callout {
   position: relative;
