@@ -3,6 +3,7 @@ package root
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -24,6 +25,11 @@ import (
 	"github.com/docker/docker-agent/pkg/tui/styles"
 )
 
+// agentPickerDefaultsSpec is the --agent-picker sentinel meaning "use the
+// default ref list". It is the flag's NoOptDefVal so a bare --agent-picker
+// resolves the defaults at parse time (including the ~/.agents scan).
+const agentPickerDefaultsSpec = "defaults"
+
 // defaultAgentPickerRefs returns the agent refs offered by the picker when
 // the user doesn't pass --agent-picker with an explicit list: the built-in
 // agents plus any agent config files found in ~/.agents.
@@ -37,7 +43,9 @@ func defaultAgentPickerRefs() []string {
 }
 
 // agentRefsInDir returns the agent config files directly inside dir, sorted
-// by name. A missing or unreadable directory yields nothing.
+// by name. Non-regular files (FIFOs, sockets, …) are skipped so a stray
+// special file can't hang the picker when its config is read; symlinks to
+// regular files are kept. A missing or unreadable directory yields nothing.
 func agentRefsInDir(dir string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -45,15 +53,26 @@ func agentRefsInDir(dir string) []string {
 	}
 	var refs []string
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if !isConfigFileName(entry.Name()) {
 			continue
 		}
-		switch strings.ToLower(filepath.Ext(entry.Name())) {
-		case ".yaml", ".yml", ".hcl":
-			refs = append(refs, filepath.Join(dir, entry.Name()))
+		ref := filepath.Join(dir, entry.Name())
+		if info, err := os.Stat(ref); err != nil || !info.Mode().IsRegular() {
+			continue
 		}
+		refs = append(refs, ref)
 	}
 	return refs
+}
+
+// isConfigFileName reports whether name has an agent config file extension.
+func isConfigFileName(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".yaml", ".yml", ".hcl":
+		return true
+	default:
+		return false
+	}
 }
 
 // errAgentPickerCancelled is returned when the user aborts the picker
@@ -190,6 +209,11 @@ type agentPickerModel struct {
 	// caller with the effective lean state (off by default).
 	leanMode bool
 
+	// offset is the index of the first visible card. The card list is
+	// windowed so a large ~/.agents directory can't grow the panel beyond
+	// the terminal height.
+	offset int
+
 	// showDetails toggles the scrollable YAML dialog overlay for the
 	// currently selected agent.
 	showDetails bool
@@ -224,11 +248,38 @@ func (m *agentPickerModel) moveUp() {
 	if m.cursor > 0 {
 		m.cursor--
 	}
+	m.clampOffset()
 }
 
 func (m *agentPickerModel) moveDown() {
 	if m.cursor < len(m.choices)-1 {
 		m.cursor++
+	}
+	m.clampOffset()
+}
+
+// visibleCount returns the number of cards shown at once: all of them when
+// they fit (or before the first WindowSizeMsg), otherwise as many as fit the
+// terminal height, at least one.
+func (m *agentPickerModel) visibleCount() int {
+	n := len(m.choices)
+	if m.height <= 0 {
+		return n
+	}
+	stride := agentPickerCardHeight + agentPickerCardGap
+	fit := (m.height - agentPickerPanelOverhead + agentPickerCardGap) / stride
+	return min(n, max(fit, 1))
+}
+
+// clampOffset keeps the visible window within bounds and the cursor inside it.
+func (m *agentPickerModel) clampOffset() {
+	n := m.visibleCount()
+	m.offset = max(min(m.offset, len(m.choices)-n), 0)
+	switch {
+	case m.cursor < m.offset:
+		m.offset = m.cursor
+	case n > 0 && m.cursor >= m.offset+n:
+		m.offset = m.cursor - n + 1
 	}
 }
 
@@ -237,6 +288,7 @@ func (m *agentPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.clampOffset()
 		m.resizeDetails()
 		return m, nil
 	case tea.KeyPressMsg:
@@ -502,6 +554,13 @@ const (
 	// agentPickerCardsLeft is the number of columns from the panel's left
 	// edge to a card: border (1) + padding (4).
 	agentPickerCardsLeft = 5
+
+	// agentPickerPanelOverhead is the number of panel rows that are not
+	// cards: border (2) + padding (2) + title (1) + blank (1) + subtitle (1)
+	// + blank (1) + blank (1) + lean checkbox (1) + blank (1) + help (1).
+	// Used to window the card list to the terminal height; must stay in sync
+	// with panelSize.
+	agentPickerPanelOverhead = 12
 )
 
 // cardWidth returns the card width to use, shrinking to fit narrow terminals.
@@ -526,10 +585,11 @@ func (m *agentPickerModel) panelOrigin() (x, y int) {
 	return max((m.width-panelWidth)/2, 0), max((m.height-panelHeight)/2, 0)
 }
 
-// cardRows returns the number of rows occupied by the stacked cards,
+// cardRows returns the number of rows occupied by the stacked visible cards,
 // including the gaps between them.
 func (m *agentPickerModel) cardRows() int {
-	return len(m.choices)*agentPickerCardHeight + max(len(m.choices)-1, 0)*agentPickerCardGap
+	n := m.visibleCount()
+	return n*agentPickerCardHeight + max(n-1, 0)*agentPickerCardGap
 }
 
 // cardAt maps terminal coordinates to the index of the agent card under them.
@@ -551,8 +611,8 @@ func (m *agentPickerModel) cardAt(x, y int) (int, bool) {
 	if relY%stride >= agentPickerCardHeight {
 		return 0, false
 	}
-	i := relY / stride
-	if i >= len(m.choices) {
+	i := relY/stride + m.offset
+	if i >= m.offset+m.visibleCount() {
 		return 0, false
 	}
 	return i, true
@@ -607,7 +667,12 @@ func (m *agentPickerModel) panelSize() (w, h int) {
 // render and panelSize so their layout math can't drift apart.
 func (m *agentPickerModel) headerText() (title, subtitle, help string) {
 	title = styles.HighlightWhiteStyle.Render("Choose an agent to run")
-	subtitle = styles.MutedStyle.Render("Pick the agent you want to start a session with, or double-click a card.")
+	subtitleText := "Pick the agent you want to start a session with, or double-click a card."
+	if n := m.visibleCount(); n < len(m.choices) {
+		subtitleText = fmt.Sprintf("Pick an agent (%d–%d of %d, scroll with ↑↓), or double-click a card.",
+			m.offset+1, m.offset+n, len(m.choices))
+	}
+	subtitle = styles.MutedStyle.Render(subtitleText)
 	help = styles.MutedStyle.Render(
 		strings.Join([]string{
 			"↑↓ move",
@@ -625,12 +690,13 @@ func (m *agentPickerModel) render() string {
 	title, subtitle, help := m.headerText()
 
 	cardWidth := m.cardWidth()
-	blocks := make([]string, 0, len(m.choices)*2)
-	for i, choice := range m.choices {
-		if i > 0 && agentPickerCardGap > 0 {
+	n := m.visibleCount()
+	blocks := make([]string, 0, n*2)
+	for i := m.offset; i < m.offset+n; i++ {
+		if i > m.offset && agentPickerCardGap > 0 {
 			blocks = append(blocks, strings.Repeat("\n", agentPickerCardGap-1))
 		}
-		blocks = append(blocks, m.renderCard(choice, cardWidth, i == m.cursor))
+		blocks = append(blocks, m.renderCard(m.choices[i], cardWidth, i == m.cursor))
 	}
 	list := lipgloss.JoinVertical(lipgloss.Left, blocks...)
 
@@ -659,8 +725,10 @@ func (m *agentPickerModel) renderDetails() string {
 	dw, _ := m.detailsDialogSize()
 	contentWidth := dw - detailsChromeCols + scrollbar.Width
 
+	// Refs can name files discovered on disk, so sanitize like any other
+	// untrusted text before it reaches the terminal.
 	ref := displayRef(m.choices[m.cursor].ref)
-	title := styles.DialogTitleStyle.Width(contentWidth).Render(toolcommon.TruncateText(ref, contentWidth))
+	title := styles.DialogTitleStyle.Width(contentWidth).Render(truncateDetail(ref, contentWidth))
 
 	// Place the scrollbar immediately to the right of the viewport content.
 	// Reserve the column even when the content fits (empty scrollbar view) so
@@ -704,15 +772,7 @@ func percentLabel(frac float64) string {
 // isLocalConfigRef reports whether ref points at a local agent config file
 // (as opposed to a built-in name, OCI image, or URL).
 func isLocalConfigRef(ref string) bool {
-	if config.IsURLReference(ref) {
-		return false
-	}
-	switch strings.ToLower(filepath.Ext(ref)) {
-	case ".yaml", ".yml", ".hcl":
-		return true
-	default:
-		return false
-	}
+	return !config.IsURLReference(ref) && isConfigFileName(ref)
 }
 
 // displayRef returns the ref as shown to the user: local config paths are
@@ -744,9 +804,10 @@ func (m *agentPickerModel) renderCard(choice agentChoice, cardWidth int, selecte
 	switch {
 	case choice.err != nil:
 		detail = styles.ErrorStyle.Render(truncateDetail("failed to load: "+choice.err.Error(), detailWidth))
-	case choice.description != "" && isLocalConfigRef(choice.ref):
+	case isLocalConfigRef(choice.ref) && truncateDetail(choice.description, detailWidth) != "":
 		// Local config files show their description as the title; the path is
-		// demoted to the detail line.
+		// demoted to the detail line. Descriptions that sanitize to nothing
+		// (whitespace or control characters only) keep the path as title.
 		title = choice.description
 		detail = styles.MutedStyle.Render(truncateDetail(displayRef(choice.ref), detailWidth))
 	case choice.description != "":
@@ -823,10 +884,10 @@ func prependAgentRef(ref string, args []string) []string {
 }
 
 // parseAgentPickerRefs splits a comma-separated list of agent refs, trims
-// whitespace, and drops empty entries. An empty or all-whitespace input
-// yields the built-in defaults.
+// whitespace, and drops empty entries. An empty/blank input or the
+// "defaults" sentinel yields the default ref list.
 func parseAgentPickerRefs(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
+	if trimmed := strings.TrimSpace(raw); trimmed == "" || trimmed == agentPickerDefaultsSpec {
 		return defaultAgentPickerRefs()
 	}
 	var refs []string

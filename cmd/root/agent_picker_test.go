@@ -4,8 +4,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -80,8 +82,28 @@ func TestParseAgentPickerRefsDefaults(t *testing.T) {
 	}
 	assert.Equal(t, want, parseAgentPickerRefs(""))
 
+	// The NoOptDefVal sentinel behaves like an empty spec.
+	assert.Equal(t, want, parseAgentPickerRefs(agentPickerDefaultsSpec))
+
 	// An explicit list bypasses the defaults entirely.
 	assert.Equal(t, []string{"coder"}, parseAgentPickerRefs("coder"))
+}
+
+func TestAgentRefsInDirSkipsNonRegularFiles(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("no mkfifo on Windows")
+	}
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "real.yaml"), nil, 0o644))
+	require.NoError(t, syscall.Mkfifo(filepath.Join(dir, "fifo.yaml"), 0o644))
+	// A symlink to a regular config file is kept.
+	require.NoError(t, os.Symlink(filepath.Join(dir, "real.yaml"), filepath.Join(dir, "link.yaml")))
+
+	want := []string{filepath.Join(dir, "link.yaml"), filepath.Join(dir, "real.yaml")}
+	assert.Equal(t, want, agentRefsInDir(dir))
 }
 
 func TestPrependAgentRef(t *testing.T) {
@@ -113,10 +135,12 @@ func TestAgentPickerCardShowsDescriptionForLocalConfigs(t *testing.T) {
 	card := ansi.Strip(m.renderCard(agentChoice{ref: "/tmp/agents/gopher.yaml", description: "Golang expert"}, 70, false))
 	assert.Less(t, strings.Index(card, "Golang expert"), strings.Index(card, "/tmp/agents/gopher.yaml"))
 
-	// Without a description the path remains the title.
-	card = ansi.Strip(m.renderCard(agentChoice{ref: "/tmp/agents/gopher.yaml"}, 70, false))
-	assert.Contains(t, card, "/tmp/agents/gopher.yaml")
-	assert.Contains(t, card, "No description available")
+	// Without a description the path remains the title; same for descriptions
+	// that sanitize to nothing.
+	for _, desc := range []string{"", "  \n\t ", "\x1b\x07"} {
+		card = ansi.Strip(m.renderCard(agentChoice{ref: "/tmp/agents/gopher.yaml", description: desc}, 70, false))
+		assert.Contains(t, card, "/tmp/agents/gopher.yaml")
+	}
 
 	// Non-path refs keep the ref as title with the description below.
 	card = ansi.Strip(m.renderCard(agentChoice{ref: "default", description: "A helpful assistant"}, 70, false))
@@ -285,6 +309,71 @@ func TestHighlightYAMLStripsInjectedEscapes(t *testing.T) {
 	assert.NotContains(t, plain, "\x1b")
 	assert.NotContains(t, plain, "\x07")
 	assert.Contains(t, plain, "value")
+}
+
+func TestAgentPickerWindowing(t *testing.T) {
+	t.Parallel()
+
+	choices := make([]agentChoice, 10)
+	for i := range choices {
+		choices[i] = agentChoice{ref: "agent-" + strconv.Itoa(i)}
+	}
+	m := newAgentPickerModel(choices)
+	m.width = 120
+	m.height = 30 // fits (30-12)/7 = 2 cards
+
+	assert.Equal(t, 2, m.visibleCount())
+
+	// The rendered panel never exceeds the terminal height, and panelSize
+	// still matches the actual render for hit-testing.
+	gotW, gotH := m.panelSize()
+	wantW, wantH := lipgloss.Size(m.render())
+	assert.LessOrEqual(t, wantH, m.height)
+	assert.Equal(t, wantW, gotW)
+	assert.Equal(t, wantH, gotH)
+
+	// Moving down past the window scrolls it, keeping the cursor visible.
+	for range 5 {
+		m.moveDown()
+	}
+	assert.Equal(t, 5, m.cursor)
+	assert.Equal(t, 4, m.offset)
+	out := ansi.Strip(m.render())
+	assert.Contains(t, out, "agent-4")
+	assert.Contains(t, out, "agent-5")
+	assert.NotContains(t, out, "agent-0")
+
+	// Hit-testing maps points to absolute indices within the window.
+	x, y := firstCardPoint(t, m, 4)
+	i, ok := m.cardAt(x, y)
+	assert.True(t, ok)
+	assert.Equal(t, 4, i)
+
+	// Moving back up scrolls the window up again.
+	for range 5 {
+		m.moveUp()
+	}
+	assert.Equal(t, 0, m.cursor)
+	assert.Equal(t, 0, m.offset)
+
+	// Growing the terminal reveals every card and clamps the offset.
+	m.cursor, m.offset = 9, 8
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 200})
+	assert.Equal(t, 10, m.visibleCount())
+	assert.Equal(t, 0, m.offset)
+}
+
+func TestAgentPickerDetailsTitleStripsEscapes(t *testing.T) {
+	t.Parallel()
+
+	m := newAgentPickerModel([]agentChoice{{ref: "evil\x1b[31m\nagent.yaml", yaml: "a: b\n"}})
+	m.width = 120
+	m.height = 40
+	m.openDetails()
+
+	out := m.renderDetails()
+	assert.NotContains(t, ansi.Strip(out), "\x1b")
+	assert.Contains(t, ansi.Strip(out), "evil[31m agent.yaml")
 }
 
 func TestAgentPickerModelNavigation(t *testing.T) {
