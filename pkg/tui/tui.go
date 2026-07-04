@@ -33,6 +33,7 @@ import (
 	"github.com/docker/docker-agent/pkg/tui/components/statusbar"
 	"github.com/docker/docker-agent/pkg/tui/components/tabbar"
 	"github.com/docker/docker-agent/pkg/tui/components/tool"
+	"github.com/docker/docker-agent/pkg/tui/components/tour"
 	"github.com/docker/docker-agent/pkg/tui/core"
 	"github.com/docker/docker-agent/pkg/tui/dialog"
 	"github.com/docker/docker-agent/pkg/tui/internal/editorname"
@@ -68,6 +69,12 @@ const (
 type appModel struct {
 	shutdownDone <-chan struct{}
 	cleanupOnce  sync.Once
+
+	// cleanupAllOnce guards the full cleanupAll shutdown sequence so repeat
+	// invocations (ExitSessionMsg followed by ExitConfirmedMsg, …) are no-ops:
+	// they must not stack goroutines behind a wedged cleanup or arm parallel
+	// safety nets that would each call exit.
+	cleanupAllOnce sync.Once
 
 	// exitFunc and shutdownTimeout override the shutdown safety net's
 	// behaviour. Both are zero by default and resolved through
@@ -202,6 +209,19 @@ type appModel struct {
 	// leanMode enables a simplified TUI with minimal chrome.
 	leanMode bool
 
+	// tour is the interactive getting-started overlay. Always non-nil;
+	// inactive until started via an option, /getting-started, or the
+	// first-run offer.
+	tour *tour.Model
+
+	// tourMode selects what happens at startup: nothing, offer the tour,
+	// or start it immediately.
+	tourMode tourMode
+
+	// tourShowTelemetryNotice folds the telemetry notice into the tour
+	// offer dialog when telemetry is enabled.
+	tourShowTelemetryNotice bool
+
 	// hideSidebar hides the sidebar and disables the ctrl+b toggle.
 	hideSidebar bool
 
@@ -244,6 +264,34 @@ func WithLeanMode() Option {
 func WithHideSidebar() Option {
 	return func(m *appModel) {
 		m.hideSidebar = true
+	}
+}
+
+// tourMode selects the getting-started tour behavior at startup.
+type tourMode int
+
+const (
+	tourModeNone tourMode = iota
+	tourModeOffer
+	tourModeStart
+)
+
+// WithTourStart starts the interactive getting-started tour as soon as the
+// TUI launches. Ignored in lean mode, which has no overlay support.
+func WithTourStart() Option {
+	return func(m *appModel) {
+		m.tourMode = tourModeStart
+	}
+}
+
+// WithTourOffer shows the first-run dialog offering the getting-started
+// tour when the TUI launches. showTelemetryNotice folds the telemetry
+// notice into the offer so it never stacks with the stderr banner. Ignored
+// in lean mode, which has no overlay support.
+func WithTourOffer(showTelemetryNotice bool) Option {
+	return func(m *appModel) {
+		m.tourMode = tourModeOffer
+		m.tourShowTelemetryNotice = showTelemetryNotice
 	}
 }
 
@@ -384,6 +432,7 @@ func New(ctx context.Context, spawner SessionSpawner, initialApp *app.App, initi
 		notification:                  notification.New(),
 		dialogMgr:                     dialog.New(),
 		completions:                   completion.New(),
+		tour:                          tour.New(),
 		transcriber:                   transcribe.New(os.Getenv("OPENAI_API_KEY")),
 		workingSpinner:                spinner.New(spinner.ModeSpinnerOnly, styles.SpinnerDotsHighlightStyle),
 		focusedPanel:                  PanelEditor,
@@ -555,6 +604,29 @@ func (m *appModel) contextShutdownCmd() tea.Cmd {
 
 // Init initializes the model.
 func (m *appModel) Init() tea.Cmd {
+	return tea.Batch(m.init(), m.tourStartupCmd())
+}
+
+// tourStartupCmd applies the configured startup tour mode: start the tour
+// right away or open the first-run offer dialog. Lean mode has no overlay
+// support, so the tour is disabled there.
+func (m *appModel) tourStartupCmd() tea.Cmd {
+	if m.leanMode {
+		return nil
+	}
+	switch m.tourMode {
+	case tourModeStart:
+		return core.CmdHandler(messages.StartTourMsg{})
+	case tourModeOffer:
+		return core.CmdHandler(dialog.OpenDialogMsg{
+			Model: dialog.NewTourOfferDialog(m.tourShowTelemetryNotice),
+		})
+	default:
+		return nil
+	}
+}
+
+func (m *appModel) init() tea.Cmd {
 	shutdownCmd := m.contextShutdownCmd()
 	// If a different tab should be active on startup, switch to it directly.
 	// The initial tab's pending restore stays lazy — it will be loaded via
@@ -600,8 +672,18 @@ func (m *appModel) Init() tea.Cmd {
 	)
 }
 
-// Update handles messages.
+// Update handles messages. It wraps update so the getting-started tour can
+// observe every message that flows through the TUI (to detect completed
+// steps) without ever consuming it.
 func (m *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	if obs := m.tour.Observe(msg); obs != nil {
+		cmd = tea.Batch(cmd, obs)
+	}
+	return model, cmd
+}
+
+func (m *appModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// In lean mode, silently drop messages for features that don't exist.
 	if m.leanMode {
 		switch msg.(type) {
@@ -826,6 +908,17 @@ func (m *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	// --- Getting-started tour ---
+
+	case messages.StartTourMsg:
+		return m.handleStartTour()
+
+	case messages.TourFinishedMsg:
+		return m.handleTourFinished(msg.Completed)
+
+	case dialog.TourOfferResultMsg:
+		return m.handleTourOfferResult(msg.Choice)
+
 	// --- Terminal bell ---
 
 	case messages.BellMsg:
@@ -989,6 +1082,9 @@ func (m *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case messages.ShowCostDialogMsg:
 		return m.handleShowCostDialog()
+
+	case messages.ShowContextDialogMsg:
+		return m.handleShowContextDialog()
 
 	case messages.ShowPermissionsDialogMsg:
 		return m.handleShowPermissionsDialog()
@@ -1197,8 +1293,19 @@ func (m *appModel) handleOpenSessionBrowser() (tea.Model, tea.Cmd) {
 		return m, notification.InfoCmd("No previous sessions found")
 	}
 
+	// Resolve the active workspace so the browser can group sessions started
+	// in the current directory. This mirrors where a restore would land: the
+	// same WorkingDir field drives replaceActiveSession.
+	var workspaceDir string
+	if runner := m.supervisor.GetRunner(m.supervisor.ActiveID()); runner != nil {
+		workspaceDir = runner.WorkingDir
+	}
+	if workspaceDir == "" {
+		workspaceDir, _ = os.Getwd()
+	}
+
 	return m, core.CmdHandler(dialog.OpenDialogMsg{
-		Model: dialog.NewSessionBrowserDialog(sessions),
+		Model: dialog.NewSessionBrowserDialog(sessions, workspaceDir),
 	})
 }
 
@@ -1776,6 +1883,8 @@ func (m *appModel) resizeAll() tea.Cmd {
 	// Full mode: update overlay components
 	cmds = append(cmds, m.updateDialogCmd(tea.WindowSizeMsg{Width: width, Height: height}))
 
+	m.tour.SetSize(width, height, m.contentHeight)
+
 	m.completions.SetEditorBottom(editorHeight + m.tabBar.Height())
 	m.completions.Update(tea.WindowSizeMsg{Width: width, Height: height})
 
@@ -1999,6 +2108,12 @@ func (m *appModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// History search is a modal state — capture all remaining keys before normal routing
 	if m.focusedPanel == PanelEditor && m.editor.IsHistorySearchActive() {
 		return m.forwardEditor(msg)
+	}
+
+	// Getting-started tour controls (Esc to quit, Enter on an empty editor
+	// to advance) sit below dialogs and completions but above normal routing.
+	if cmd, handled := m.handleTourKey(msg); handled {
+		return m, cmd
 	}
 
 	switch {
@@ -2507,12 +2622,18 @@ func (m *appModel) View() tea.View {
 	baseView := lipgloss.JoinVertical(lipgloss.Top, viewParts...)
 
 	// Handle overlays
-	hasOverlays := m.dialogMgr.Open() || m.notification.Open() || m.completions.Open()
+	hasOverlays := m.dialogMgr.Open() || m.notification.Open() || m.completions.Open() || m.tour.Active()
 
 	if hasOverlays {
 		baseLayer := lipgloss.NewLayer(baseView)
 		var allLayers []*lipgloss.Layer
 		allLayers = append(allLayers, baseLayer)
+
+		// The tour card sits above the base UI but below dialogs, so the
+		// step it teaches (palette, tool approval…) is never hidden by it.
+		if tourLayer := m.tour.Layer(); tourLayer != nil {
+			allLayers = append(allLayers, tourLayer)
+		}
 
 		if m.dialogMgr.Open() {
 			dialogLayers := m.dialogMgr.GetLayers()
@@ -2596,46 +2717,68 @@ func (m *appModel) cleanupManagedResources() {
 	})
 }
 
-// cleanupAll cleans up all sessions, editors, and resources.
+// cleanupAll cleans up all sessions, editors, and resources. It is invoked
+// from several message handlers (ExitSessionMsg, ExitConfirmedMsg, …) and may
+// be called more than once on the same model; the entire shutdown sequence is
+// once-guarded so repeat calls are no-ops and cannot pile up goroutines on a
+// wedged cleanup or arm parallel safety nets.
 func (m *appModel) cleanupAll() {
-	m.transcriber.Stop()
-	m.closeTranscriptCh()
-	for _, ed := range m.editors {
-		ed.Cleanup()
-	}
-	m.cleanupManagedResources()
+	m.cleanupAllOnce.Do(func() {
+		m.transcriber.Stop()
+		m.closeTranscriptCh()
+		for _, ed := range m.editors {
+			ed.Cleanup()
+		}
 
-	// Safety net: bubbletea's renderer can deadlock on shutdown if stdout
-	// is wedged — the final flush re-acquires the mutex that the still
-	// blocked previous flush is holding. Race Wait() against a deadline
-	// and force-exit if shutdown stalls. Snapshot the package globals so
-	// they can't race with t.Cleanup. Clear m.program so subsequent calls
-	// to cleanupAll (e.g. ExitSessionMsg followed by ExitConfirmedMsg) are
-	// no-ops and don't spawn parallel safety nets that would each call exit.
-	program := m.program
-	if program == nil {
-		return
-	}
-	m.program = nil
-	timeout := m.shutdownTimeoutOrDefault()
-	exit := m.exitFn()
-	go func() {
-		done := make(chan struct{})
+		// Shut down managed resources (supervisor, TUI state store) in the
+		// background: supervisor.Shutdown stops every session's toolsets, which
+		// can block indefinitely (e.g. an MCP toolset wedged behind a broken
+		// Docker daemon). Running it synchronously here would freeze the Update
+		// loop before tea.Quit is ever returned, leaving the exit confirmation
+		// apparently ignored.
+		cleanupDone := make(chan struct{})
 		go func() {
-			program.Wait()
-			close(done)
+			defer close(cleanupDone)
+			m.cleanupManagedResources()
 		}()
 
-		select {
-		case <-done:
-		case <-time.After(timeout):
-			slog.Warn("Graceful shutdown timed out, forcing exit")
-			// ReleaseTerminal grabs the same mutex that's stuck, so
-			// fire-and-forget; exit either way.
-			go func() { _ = program.ReleaseTerminal() }()
-			exit(0)
+		// Safety net: bubbletea's renderer can deadlock on shutdown if stdout
+		// is wedged — the final flush re-acquires the mutex that the still
+		// blocked previous flush is holding — and the resource cleanup above can
+		// likewise stall forever. Race both against a deadline and force-exit if
+		// shutdown stalls. Snapshot the program and package globals so they
+		// can't race with t.Cleanup. Without a program (tests, exit before
+		// SetProgram) there is no renderer to deadlock and no UI left to
+		// unblock, so no safety net is armed; the background cleanup still runs.
+		program := m.program
+		if program == nil {
+			return
 		}
-	}()
+		m.program = nil
+		timeout := m.shutdownTimeoutOrDefault()
+		exit := m.exitFn()
+		go func() {
+			done := make(chan struct{})
+			go func() {
+				program.Wait()
+				close(done)
+			}()
+
+			deadline := time.After(timeout)
+			for _, ch := range []<-chan struct{}{done, cleanupDone} {
+				select {
+				case <-ch:
+				case <-deadline:
+					slog.Warn("Graceful shutdown timed out, forcing exit")
+					// ReleaseTerminal grabs the same mutex that's stuck, so
+					// fire-and-forget; exit either way.
+					go func() { _ = program.ReleaseTerminal() }()
+					exit(0)
+					return
+				}
+			}
+		}()
+	})
 }
 
 // openExternalEditor opens the current editor content in an external editor.

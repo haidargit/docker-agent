@@ -118,6 +118,17 @@ func builtInSessionCommands() []Item {
 			},
 		},
 		{
+			ID:           "session.context",
+			Label:        "Context",
+			SlashCommand: "/context",
+			Description:  "Show what is consuming the context window, by category",
+			Category:     "Session",
+			Immediate:    true,
+			Execute: func(string) tea.Cmd {
+				return core.CmdHandler(messages.ShowContextDialogMsg{})
+			},
+		},
+		{
 			ID:           "session.cost",
 			Label:        "Cost",
 			SlashCommand: "/cost",
@@ -132,7 +143,7 @@ func builtInSessionCommands() []Item {
 			ID:           "session.effort",
 			Label:        "Effort",
 			SlashCommand: "/effort",
-			Description:  "Set the reasoning effort of the current model (usage: /effort <level>)",
+			Description:  "Set the reasoning effort of the current model (usage: /effort [level])",
 			Category:     "Session",
 			Immediate:    true,
 			Execute: func(arg string) tea.Cmd {
@@ -383,6 +394,22 @@ func builtInSettingsCommands() []Item {
 	}
 }
 
+func builtInHelpCommands() []Item {
+	return []Item{
+		{
+			ID:           "help.getting-started",
+			Label:        "Getting Started Tour",
+			SlashCommand: "/getting-started",
+			Description:  "Learn docker agent by doing, a 2-minute interactive tour",
+			Category:     "Help",
+			Immediate:    true,
+			Execute: func(string) tea.Cmd {
+				return core.CmdHandler(messages.StartTourMsg{})
+			},
+		},
+	}
+}
+
 func builtInFeedbackCommands() []Item {
 	return []Item{
 		{
@@ -590,11 +617,15 @@ func BuildCommandCategories(ctx context.Context, application *app.App) []Categor
 		})
 	}
 
-	// Settings and Feedback are always last, in that order.
+	// Settings, Help, and Feedback are always last, in that order.
 	categories = append(categories,
 		Category{
 			Name:     "Settings",
 			Commands: builtInSettingsCommands(),
+		},
+		Category{
+			Name:     "Help",
+			Commands: builtInHelpCommands(),
 		},
 		Category{
 			Name:     "Feedback",

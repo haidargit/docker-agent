@@ -315,6 +315,11 @@ type LocalRuntime struct {
 	// defaultToolListTimeout; overridden via WithToolListTimeout.
 	toolListTimeout time.Duration
 
+	// toolStartTimeout bounds how long EmitStartupInfo waits for a single
+	// toolset to start before skipping it for the startup sidebar pass.
+	// Defaults to defaultToolStartTimeout; overridden via WithToolStartTimeout.
+	toolStartTimeout time.Duration
+
 	// pauseMu guards pauseCh.
 	pauseMu sync.Mutex
 	// pauseCh is non-nil and open while /pause has paused the run loop;
@@ -482,6 +487,19 @@ func WithToolListTimeout(d time.Duration) Opt {
 	}
 }
 
+// WithToolStartTimeout overrides how long EmitStartupInfo waits for a single
+// toolset to start before skipping it. Defaults to defaultToolStartTimeout.
+// A non-positive value is ignored so the default stands. Tests pass a short
+// timeout to exercise the skip path (a toolset whose Start() blocks) without
+// a real-time wait.
+func WithToolStartTimeout(d time.Duration) Opt {
+	return func(r *LocalRuntime) {
+		if d > 0 {
+			r.toolStartTimeout = d
+		}
+	}
+}
+
 // WithRetryOnRateLimit enables automatic retry with backoff for HTTP 429 (rate limit)
 // errors when no fallback models are available. When enabled, the runtime will honor
 // the Retry-After header from the provider's response to determine wait time before
@@ -570,6 +588,7 @@ func NewLocalRuntime(ctx context.Context, agents *team.Team, opts ...Opt) (*Loca
 		providerRegistry:       provider.DefaultRegistry(),
 		maxOverflowCompactions: defaultMaxOverflowCompactions,
 		toolListTimeout:        defaultToolListTimeout,
+		toolStartTimeout:       defaultToolStartTimeout,
 		dmrModelLister:         dmr.ListModels,
 	}
 	r.bgAgents = agenttool.NewHandler(r)
@@ -1011,23 +1030,30 @@ func (r *LocalRuntime) AgentToolsetStatuses(name string) []tools.ToolsetStatus {
 //   - no toolset matches name (matching uses the same logic as the
 //     /tools dialog: the toolset's Name() if any, otherwise its
 //     description),
-//   - the toolset is not supervisor-backed (no Restartable capability),
+//   - no matching toolset is supervisor-backed (no Restartable capability),
 //   - the supervisor itself returned an error (timeout, classified
 //     transport failure, etc.).
+//
+// Display names are not guaranteed unique (a YAML name: can shadow a
+// built-in), so non-restartable matches are skipped rather than aborting:
+// the first restartable toolset with the given name wins.
 func (r *LocalRuntime) RestartToolset(ctx context.Context, name string) error {
 	a := r.CurrentAgent()
 	if a == nil {
 		return errors.New("no active agent")
 	}
+	found := false
 	for _, ts := range a.ToolSets() {
 		if nameFor(ts, tools.DescribeToolSet(ts)) != name {
 			continue
 		}
-		restartable, ok := tools.As[tools.Restartable](ts)
-		if !ok {
-			return fmt.Errorf("toolset %q does not support restart", name)
+		found = true
+		if restartable, ok := tools.As[tools.Restartable](ts); ok {
+			return restartable.Restart(ctx)
 		}
-		return restartable.Restart(ctx)
+	}
+	if found {
+		return fmt.Errorf("toolset %q does not support restart", name)
 	}
 	return fmt.Errorf("toolset %q not found", name)
 }
@@ -1562,8 +1588,19 @@ func (r *LocalRuntime) emitToolsProgressively(ctx context.Context, a *agent.Agen
 		// can fire the targeted re-auth notice. Start() is a no-op when the
 		// toolset is already healthy, so calling it unconditionally is safe.
 		if startable, ok := toolset.(*tools.StartableToolSet); ok {
-			if err := startable.Start(ctx); err != nil {
+			if err := startToolsetWithTimeout(ctx, startable, r.toolStartTimeout); err != nil {
 				desc := tools.DescribeToolSet(startable.ToolSet)
+				// A start that outlived its deadline (e.g. an MCP container
+				// stuck behind a wedged Docker daemon) is reported directly:
+				// the abandoned Start goroutine has not returned, so the
+				// once-per-streak guard below has recorded nothing and would
+				// silently swallow the warning.
+				if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+					slog.WarnContext(ctx, "Toolset start timed out; skipping",
+						"agent", a.Name(), "toolset", desc, "timeout", r.toolStartTimeout)
+					a.AddToolWarning(fmt.Sprintf("%s is taking too long to start (>%s) — it keeps starting in the background and its tools appear once it is ready", desc, r.toolStartTimeout))
+					continue
+				}
 				// IsAuthorizationRequired must be checked BEFORE
 				// ShouldReportFailure: this is the first — expected —
 				// failure of a deferred-OAuth toolset, and consuming the
@@ -1668,6 +1705,40 @@ func listToolsWithTimeout(ctx context.Context, toolset tools.ToolSet, timeout ti
 	}
 }
 
+// startToolsetWithTimeout starts a toolset under a bounded deadline, mirroring
+// listToolsWithTimeout. The deadline must be enforced by racing the call
+// against the timeout (not only via the context): the MCP connector detaches
+// the context it is handed with context.WithoutCancel, so a wedged initialize
+// handshake (e.g. Docker failing to start the server container) would ignore a
+// ctx deadline and block startup forever. On timeout it returns the context
+// error; the orphaned goroutine sends into a buffered channel and exits if the
+// call ever returns.
+//
+// The abandoned goroutine keeps holding the StartableToolSet's single-flight
+// lock, so later Start/Stop calls on the same toolset wait for the original
+// attempt rather than racing it — if it eventually completes, the toolset
+// becomes usable on the next turn; if it never does, the TUI shutdown safety
+// net still bounds the exit path.
+func startToolsetWithTimeout(ctx context.Context, toolset *tools.StartableToolSet, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = defaultToolStartTimeout
+	}
+	startCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	done := make(chan error, 1) // buffered so a late send never blocks
+	go func() {
+		done <- toolset.Start(startCtx)
+	}()
+
+	select {
+	case <-startCtx.Done():
+		return startCtx.Err()
+	case err := <-done:
+		return err
+	}
+}
+
 func (r *LocalRuntime) Resume(_ context.Context, req ResumeRequest) {
 	slog.Debug("Resuming runtime", "agent", r.currentAgentName(), "type", req.Type, "reason", req.Reason)
 
@@ -1765,9 +1836,9 @@ func (r *LocalRuntime) Summarize(ctx context.Context, sess *session.Session, add
 //
 // reason is reported to BeforeCompaction / AfterCompaction hooks as
 // CompactionReason. Use [compactionReasonThreshold] for proactive
-// 90%-of-context triggers, [compactionReasonOverflow] for post-overflow
-// auto-recovery, [compactionReasonToolOverflow] for tool-result-driven
-// 90% triggers, or [compactionReasonManual] for user-invoked compactions.
+// threshold-of-context triggers (90% by default, tunable via
+// compaction_threshold), [compactionReasonOverflow] for post-overflow
+// auto-recovery, or [compactionReasonManual] for user-invoked compactions.
 //
 // PreCompact hooks fire first via the legacy [hooks.Input.Source] field
 // ("auto" / "tool_overflow" / "overflow" / "manual"); they may cancel the

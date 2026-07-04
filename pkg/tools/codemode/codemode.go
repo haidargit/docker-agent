@@ -42,7 +42,13 @@ type codeModeTool struct {
 var (
 	_ tools.ToolSet   = (*codeModeTool)(nil)
 	_ tools.Startable = (*codeModeTool)(nil)
+	_ tools.Named     = (*codeModeTool)(nil)
 )
+
+// Name implements tools.Named; loader-created, so no registry WithName wrapper.
+func (c *codeModeTool) Name() string {
+	return "code_mode"
+}
 
 type RunToolsWithJavascriptArgs struct {
 	Script string `json:"script" jsonschema:"Script to execute"`

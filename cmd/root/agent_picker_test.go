@@ -2,8 +2,12 @@ package root
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -11,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRenderTags(t *testing.T) {
@@ -38,13 +43,10 @@ func TestParseAgentPickerRefs(t *testing.T) {
 		raw  string
 		want []string
 	}{
-		{"empty defaults", "", []string{"default", "coder"}},
-		{"whitespace defaults", "   ", []string{"default", "coder"}},
 		{"single ref", "coder", []string{"coder"}},
 		{"multiple refs", "default,coder", []string{"default", "coder"}},
 		{"trims whitespace", " default , coder ", []string{"default", "coder"}},
 		{"drops empty entries", "default,,coder,", []string{"default", "coder"}},
-		{"only commas defaults", ",,,", []string{"default", "coder"}},
 		{"external refs", "default,agentcatalog/pirate", []string{"default", "agentcatalog/pirate"}},
 	}
 	for _, tt := range tests {
@@ -54,12 +56,106 @@ func TestParseAgentPickerRefs(t *testing.T) {
 	}
 }
 
+func TestParseAgentPickerRefsDefaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
+
+	// Without ~/.agents, only the built-in agents are offered.
+	for _, raw := range []string{"", "   ", ",,,"} {
+		assert.Equal(t, []string{"default", "coder"}, parseAgentPickerRefs(raw))
+	}
+
+	// Config files in ~/.agents are appended to the built-ins; directories
+	// (e.g. skills) and non-config files are ignored.
+	agentsDir := filepath.Join(home, ".agents")
+	require.NoError(t, os.MkdirAll(filepath.Join(agentsDir, "skills"), 0o755))
+	for _, name := range []string{"assistant.yaml", "gopher.yml", "notes.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(agentsDir, name), nil, 0o644))
+	}
+
+	want := []string{
+		"default",
+		"coder",
+		filepath.Join(agentsDir, "assistant.yaml"),
+		filepath.Join(agentsDir, "gopher.yml"),
+	}
+	assert.Equal(t, want, parseAgentPickerRefs(""))
+
+	// The NoOptDefVal sentinel behaves like an empty spec.
+	assert.Equal(t, want, parseAgentPickerRefs(agentPickerDefaultsSpec))
+
+	// An explicit list bypasses the defaults entirely.
+	assert.Equal(t, []string{"coder"}, parseAgentPickerRefs("coder"))
+}
+
+func TestAgentRefsInDirSkipsNonRegularFiles(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("no mkfifo on Windows")
+	}
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "real.yaml"), nil, 0o644))
+	require.NoError(t, syscall.Mkfifo(filepath.Join(dir, "fifo.yaml"), 0o644))
+	// A symlink to a regular config file is kept.
+	require.NoError(t, os.Symlink(filepath.Join(dir, "real.yaml"), filepath.Join(dir, "link.yaml")))
+
+	want := []string{filepath.Join(dir, "link.yaml"), filepath.Join(dir, "real.yaml")}
+	assert.Equal(t, want, agentRefsInDir(dir))
+}
+
 func TestPrependAgentRef(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, []string{"coder"}, prependAgentRef("coder", nil))
 	assert.Equal(t, []string{"coder", "hello"}, prependAgentRef("coder", []string{"hello"}))
 	assert.Equal(t, []string{"coder", "a", "b"}, prependAgentRef("coder", []string{"a", "b"}))
+}
+
+func TestIsLocalConfigRef(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, isLocalConfigRef("/home/user/.agents/assistant.yaml"))
+	assert.True(t, isLocalConfigRef("./agent.yml"))
+	assert.True(t, isLocalConfigRef("agent.hcl"))
+	assert.False(t, isLocalConfigRef("default"))
+	assert.False(t, isLocalConfigRef("agentcatalog/pirate"))
+	assert.False(t, isLocalConfigRef("https://example.com/agent.yaml"))
+}
+
+func TestAgentPickerCardShowsDescriptionForLocalConfigs(t *testing.T) {
+	t.Parallel()
+
+	m := newAgentPickerModel(nil)
+
+	// Local config files show the description as the title, with the path
+	// demoted to the detail line.
+	card := ansi.Strip(m.renderCard(agentChoice{ref: "/tmp/agents/gopher.yaml", description: "Golang expert"}, 70, false))
+	assert.Less(t, strings.Index(card, "Golang expert"), strings.Index(card, "/tmp/agents/gopher.yaml"))
+
+	// Without a description the path remains the title; same for descriptions
+	// that sanitize to nothing.
+	for _, desc := range []string{"", "  \n\t ", "\x1b\x07"} {
+		card = ansi.Strip(m.renderCard(agentChoice{ref: "/tmp/agents/gopher.yaml", description: desc}, 70, false))
+		assert.Contains(t, card, "/tmp/agents/gopher.yaml")
+	}
+
+	// Non-path refs keep the ref as title with the description below.
+	card = ansi.Strip(m.renderCard(agentChoice{ref: "default", description: "A helpful assistant"}, 70, false))
+	assert.Less(t, strings.Index(card, "default"), strings.Index(card, "A helpful assistant"))
+}
+
+func TestAgentPickerCardShortensHomePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
+
+	ref := filepath.Join(home, ".agents", "gopher.yaml")
+	card := ansi.Strip(newAgentPickerModel(nil).renderCard(agentChoice{ref: ref, description: "Golang expert"}, 70, false))
+	assert.Contains(t, card, filepath.Join("~", ".agents", "gopher.yaml"))
+	assert.NotContains(t, card, home)
 }
 
 func TestTruncateDetail(t *testing.T) {
@@ -213,6 +309,77 @@ func TestHighlightYAMLStripsInjectedEscapes(t *testing.T) {
 	assert.NotContains(t, plain, "\x1b")
 	assert.NotContains(t, plain, "\x07")
 	assert.Contains(t, plain, "value")
+}
+
+func TestAgentPickerWindowing(t *testing.T) {
+	t.Parallel()
+
+	choices := make([]agentChoice, 10)
+	for i := range choices {
+		choices[i] = agentChoice{ref: "agent-" + strconv.Itoa(i)}
+	}
+	m := newAgentPickerModel(choices)
+	m.width = 120
+	m.height = 30 // fits (30-12)/7 = 2 cards
+
+	assert.Equal(t, 2, m.visibleCount())
+
+	// The rendered panel never exceeds the terminal height, and panelSize
+	// still matches the actual render for hit-testing.
+	gotW, gotH := m.panelSize()
+	wantW, wantH := lipgloss.Size(m.render())
+	assert.LessOrEqual(t, wantH, m.height)
+	assert.Equal(t, wantW, gotW)
+	assert.Equal(t, wantH, gotH)
+
+	// Moving down past the window scrolls it, keeping the cursor visible.
+	// The panel geometry must not shift while scrolling, or mouse
+	// hit-testing would mis-track the cards.
+	w0, h0 := m.panelSize()
+	for range 5 {
+		m.moveDown()
+		w, h := m.panelSize()
+		assert.Equal(t, w0, w, "panel width changed while scrolling")
+		assert.Equal(t, h0, h, "panel height changed while scrolling")
+	}
+	assert.Equal(t, 5, m.cursor)
+	assert.Equal(t, 4, m.offset)
+	out := ansi.Strip(m.render())
+	assert.Contains(t, out, "agent-4")
+	assert.Contains(t, out, "agent-5")
+	assert.NotContains(t, out, "agent-0")
+
+	// Hit-testing maps points to absolute indices within the window.
+	x, y := firstCardPoint(t, m, 4)
+	i, ok := m.cardAt(x, y)
+	assert.True(t, ok)
+	assert.Equal(t, 4, i)
+
+	// Moving back up scrolls the window up again.
+	for range 5 {
+		m.moveUp()
+	}
+	assert.Equal(t, 0, m.cursor)
+	assert.Equal(t, 0, m.offset)
+
+	// Growing the terminal reveals every card and clamps the offset.
+	m.cursor, m.offset = 9, 8
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 200})
+	assert.Equal(t, 10, m.visibleCount())
+	assert.Equal(t, 0, m.offset)
+}
+
+func TestAgentPickerDetailsTitleStripsEscapes(t *testing.T) {
+	t.Parallel()
+
+	m := newAgentPickerModel([]agentChoice{{ref: "evil\x1b[31m\nagent.yaml", yaml: "a: b\n"}})
+	m.width = 120
+	m.height = 40
+	m.openDetails()
+
+	out := m.renderDetails()
+	assert.NotContains(t, ansi.Strip(out), "\x1b")
+	assert.Contains(t, ansi.Strip(out), "evil[31m agent.yaml")
 }
 
 func TestAgentPickerModelNavigation(t *testing.T) {
@@ -449,6 +616,94 @@ func TestAgentPickerWheelIgnoredWithoutDetails(t *testing.T) {
 	_, cmd := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 	assert.Nil(t, cmd, "wheel does nothing while the card list is shown")
 	assert.Equal(t, 0, m.cursor)
+}
+
+func TestAgentPickerLeanCheckboxDefaultsUnticked(t *testing.T) {
+	t.Parallel()
+
+	m := newAgentPickerModel([]agentChoice{{ref: "default"}, {ref: "coder"}})
+	m.width = 120
+	m.height = 40
+
+	assert.False(t, m.leanMode, "lean mode must be off by default")
+	assert.Contains(t, ansi.Strip(m.render()), "[ ] Lean Mode", "checkbox renders unticked by default")
+}
+
+func TestAgentPickerLeanCheckboxSeeded(t *testing.T) {
+	t.Parallel()
+
+	// When the run would already be lean (--lean or user config), the
+	// checkbox must reflect it instead of lying about the run mode.
+	m := newAgentPickerModel([]agentChoice{{ref: "default"}, {ref: "coder"}})
+	m.leanMode = true
+	m.width = 120
+	m.height = 40
+
+	assert.Contains(t, ansi.Strip(m.render()), "[x] Lean Mode")
+}
+
+func TestAgentPickerLeanCheckboxKeyToggle(t *testing.T) {
+	t.Parallel()
+
+	m := newAgentPickerModel([]agentChoice{{ref: "default"}, {ref: "coder"}})
+	m.width = 120
+	m.height = 40
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	assert.Nil(t, cmd)
+	assert.True(t, m.leanMode)
+	assert.Contains(t, ansi.Strip(m.render()), "[x] Lean Mode")
+
+	_, _ = m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	assert.False(t, m.leanMode)
+}
+
+func TestAgentPickerLeanCheckboxClickToggle(t *testing.T) {
+	t.Parallel()
+
+	m := newAgentPickerModel([]agentChoice{{ref: "default"}, {ref: "coder"}})
+	m.width = 120
+	m.height = 40
+
+	// Locate the checkbox on the rendered screen and click it. Note:
+	// strings.Index returns a byte offset; convert the prefix to display
+	// columns because border runes (│) are multi-byte.
+	screen := ansi.Strip(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.render()))
+	lines := strings.Split(screen, "\n")
+	var x, y int
+	found := false
+	for row, line := range lines {
+		if prefix, _, ok := strings.Cut(line, "[ ] Lean Mode"); ok {
+			x, y, found = lipgloss.Width(prefix), row, true
+			break
+		}
+	}
+	assert.True(t, found, "checkbox not found on screen")
+	assert.True(t, m.leanCheckboxAt(x, y), "hit zone must match the rendered checkbox")
+
+	// Hit-zone boundaries: both edges are inside; one cell beyond each edge
+	// and the adjacent rows are outside.
+	checkboxWidth := len("[ ] Lean Mode")
+	assert.True(t, m.leanCheckboxAt(x+checkboxWidth-1, y), "right edge must be inside")
+	assert.False(t, m.leanCheckboxAt(x-1, y), "left of the checkbox must miss")
+	assert.False(t, m.leanCheckboxAt(x+checkboxWidth, y), "right of the checkbox must miss")
+	assert.False(t, m.leanCheckboxAt(x, y-1), "row above must miss")
+	assert.False(t, m.leanCheckboxAt(x, y+1), "row below must miss")
+
+	click := tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft}
+	_, cmd := m.Update(click)
+	assert.Nil(t, cmd, "clicking the checkbox must not quit")
+	assert.True(t, m.leanMode)
+
+	// A second click within the double-click threshold toggles back rather
+	// than being treated as a card double-click.
+	_, cmd = m.Update(click)
+	assert.Nil(t, cmd)
+	assert.False(t, m.leanMode)
+
+	// The checkbox row must not hit any card.
+	_, ok := m.cardAt(x, y)
+	assert.False(t, ok, "checkbox row must not resolve to a card")
 }
 
 // firstCardPoint scans the grid for a coordinate that maps to card index want.

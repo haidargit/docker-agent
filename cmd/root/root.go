@@ -42,6 +42,9 @@ func NewRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "docker-agent",
 		Short: "Docker AI Agent Runner",
+		Long: `Docker AI Agent Runner.
+
+New to docker agent? Take the hands-on tour: docker agent getting-started`,
 		Example: `  docker-agent run
   docker-agent run ./agent.yaml
   docker-agent run agentcatalog/pirate`,
@@ -158,6 +161,7 @@ We collect anonymous usage data to help improve docker agent. To disable:
 		newVersionCmd(),
 		newRunCmd(),
 		newNewCmd(),
+		newGettingStartedCmd(),
 		newEvalCmd(),
 		newShareCmd(),
 		newModelsCmd(),

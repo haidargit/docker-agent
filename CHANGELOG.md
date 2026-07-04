@@ -3,6 +3,78 @@
 All notable changes to this project will be documented in this file.
 
 
+## [v1.98.0] - 2026-07-03
+
+This release adds several new TUI features including an interactive getting-started tour, an effort picker dialog, and Lean Mode support in the agent picker, along with stability fixes for startup, shutdown, and proxy recovery.
+
+## What's New
+
+- Adds an interactive getting-started tour offered on first run and replayable on demand, implemented as a floating card that observes the real UI's message stream
+- Opens an effort picker dialog when `/effort` is used with no argument, instead of printing a usage hint
+- Adds a Lean Mode checkbox to the agent picker panel, toggleable with the `l` key or mouse click
+- Agent picker now discovers `~/.agents` config files (`.yaml`, `.yml`, `.hcl`) when no explicit list is given, in addition to the built-in `default` and `coder` agents
+- Adds cross-process locking and atomic writes for SQLite memory storage
+
+## Bug Fixes
+
+- Fixes toolset `Start` during startup so the sidebar tools spinner can no longer animate forever when Docker is wedged
+- Fixes TUI exit being blocked by a wedged resource cleanup
+- Fixes `--record` proxy bypassing the configured models gateway, which caused HTTP 401 errors when gateway-managed credentials were expected
+- Hardens gateway forwarding in record mode against credential leakage
+- Fixes proxy recovery after cooldown — previously a socket error would permanently latch the transport to direct connections for the lifetime of the process
+- Fixes `/tools` dialog showing Go type names (e.g. `*skills.ToolSet`) instead of human-readable names for loader-created toolsets
+- Fixes telemetry incorrectly recording an error on a chat span after a successful LLM completion
+- Fixes agent picker hardening: windowing, escapes, FIFO skip, sentinel, and description guard
+- Keeps agent picker panel geometry stable and windowing math in sync
+
+## Technical Changes
+
+- Fixes flaky frame synchronization in TUI test driver `sendSync`
+- Fixes file descriptor double-close corrupting parallel tests in `TestListen_FD`
+- Guards `fdOwnershipPin` with a mutex to fix a data race in server tests
+- Trims comments in the fallback transport
+### Pull Requests
+
+- [#3114](https://github.com/docker/docker-agent/pull/3114) - feat(memory): add cross-process locking and atomic writes for sqlite
+- [#3281](https://github.com/docker/docker-agent/pull/3281) - telemetry: don't record error on chat span after successful LLM completion
+- [#3412](https://github.com/docker/docker-agent/pull/3412) - feat(tui): generate a TUI e2e test from a `--record` session
+- [#3420](https://github.com/docker/docker-agent/pull/3420) - test: fix flaky tuitest frame sync and TestListen_FD fd double-close
+- [#3423](https://github.com/docker/docker-agent/pull/3423) - fix: bound toolset startup and never block the TUI exit when Docker is wedged
+- [#3424](https://github.com/docker/docker-agent/pull/3424) - docs: update CHANGELOG.md for v1.97.0
+- [#3425](https://github.com/docker/docker-agent/pull/3425) - feat(tui): open effort picker when /effort has no argument
+- [#3427](https://github.com/docker/docker-agent/pull/3427) - feat(tui): interactive getting-started tour on first run, replayable on demand
+- [#3428](https://github.com/docker/docker-agent/pull/3428) - fix: route --record proxy through the configured models gateway
+- [#3430](https://github.com/docker/docker-agent/pull/3430) - docs: sync documentation with recent merges
+- [#3431](https://github.com/docker/docker-agent/pull/3431) - fix(remote): recover proxy after cooldown instead of latching to direct
+- [#3441](https://github.com/docker/docker-agent/pull/3441) - fix: show proper toolset names in /tools dialog for loader-created toolsets
+- [#3443](https://github.com/docker/docker-agent/pull/3443) - feat(picker): add Lean Mode checkbox to agent picker
+- [#3444](https://github.com/docker/docker-agent/pull/3444) - feat: agent picker discovers ~/.agents configs when no list is given
+
+
+## [v1.97.0] - 2026-07-02
+
+This release adds global hook support in user config, expands environment variable references in hook and script-shell fields, and fixes hook field merging.
+
+## What's New
+- Adds support for global hooks in user config (`~/.config/cagent/config.yaml`), with hooks merged in order: agent config → global → CLI
+- Adds `${env.X}` expansion in hook and script-shell `working_dir` and `env` fields, giving them the same treatment as other `working_dir` fields
+
+## Bug Fixes
+- Fixes hook field merging so all `HooksConfig` fields are combined correctly when merging config and CLI hooks
+- Fixes unset `${env.X}` references to log at debug level instead of silently failing; config env now takes precedence over host env
+
+## Technical Changes
+- Fixes flaky `TestAttachedServer_DeleteEmitsSessionExited` test caused by a race between session deletion and event log subscription
+### Pull Requests
+
+- [#2615](https://github.com/docker/docker-agent/pull/2615) - feat(config): expand ${env.X} in hook and script-shell working_dir/env (#2615)
+- [#3416](https://github.com/docker/docker-agent/pull/3416) - feat(config): expand ${env.X} in hook and script-shell working_dir/env
+- [#3417](https://github.com/docker/docker-agent/pull/3417) - docs: update CHANGELOG.md for v1.96.0
+- [#3418](https://github.com/docker/docker-agent/pull/3418) - test: fix flaky TestAttachedServer_DeleteEmitsSessionExited
+- [#3419](https://github.com/docker/docker-agent/pull/3419) - fix: merge all hook fields
+- [#3422](https://github.com/docker/docker-agent/pull/3422) - feat: support global hooks in user config
+
+
 ## [v1.96.0] - 2026-07-02
 
 This release adds session resumption across agent URL changes, TUI e2e test generation from recorded sessions, and fixes for duplicate tool names and Anthropic adaptive thinking display.
@@ -4305,3 +4377,7 @@ This release improves the terminal user interface with better error handling and
 [v1.95.0]: https://github.com/docker/docker-agent/releases/tag/v1.95.0
 
 [v1.96.0]: https://github.com/docker/docker-agent/releases/tag/v1.96.0
+
+[v1.97.0]: https://github.com/docker/docker-agent/releases/tag/v1.97.0
+
+[v1.98.0]: https://github.com/docker/docker-agent/releases/tag/v1.98.0

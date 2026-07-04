@@ -498,7 +498,7 @@ func (r *LocalRuntime) runStreamLoop(ctx context.Context, sess *session.Session,
 		// trigger and the UI context gauge (issue #3241); it equals the primary
 		// window unless a smaller compaction model is configured.
 		contextLimit := r.effectiveContextLimit(ctx, a, r.resolveContextLimit(ctx, model, modelID))
-		if contextLimit > 0 && r.sessionCompaction && compaction.ShouldCompact(sess.InputTokens, sess.OutputTokens, 0, contextLimit) {
+		if contextLimit > 0 && r.sessionCompactionEnabled(a) && compaction.ShouldCompact(sess.InputTokens, sess.OutputTokens, 0, contextLimit, a.CompactionThreshold()) {
 			r.compactWithReason(ctx, sess, "", compactionReasonThreshold, sink)
 		}
 
@@ -1091,8 +1091,9 @@ func usageHasTokens(usage *chat.Usage) bool {
 
 // compactIfNeeded estimates the token impact of tool results added since
 // messageCountBefore and triggers proactive compaction when the estimated
-// total exceeds 90% of the context window. This prevents sending an
-// oversized request on the next iteration.
+// total crosses the agent's compaction threshold (90% of the context window
+// by default). This prevents sending an oversized request on the next
+// iteration.
 func (r *LocalRuntime) compactIfNeeded(
 	ctx context.Context,
 	sess *session.Session,
@@ -1104,7 +1105,7 @@ func (r *LocalRuntime) compactIfNeeded(
 	// contextLimit is the effective budget (primary window, capped to a smaller
 	// dedicated compaction model's window when configured) computed by
 	// runStreamLoop, so this site fires consistently with the pre-turn trigger.
-	if !r.sessionCompaction || contextLimit <= 0 {
+	if !r.sessionCompactionEnabled(a) || contextLimit <= 0 {
 		return
 	}
 
@@ -1113,21 +1114,35 @@ func (r *LocalRuntime) compactIfNeeded(
 	// never enters this session's prompt, so counting it here would
 	// attribute phantom tokens to a small parent conversation and
 	// trigger a compaction that wipes it (see issue #2871).
-	newMessages := sess.OwnMessages()[messageCountBefore:]
+	//
+	// The estimator is calibrated against the provider-reported usage
+	// already recorded on this session's assistant messages, so the
+	// heuristic guess for the fresh tool results tracks the provider's
+	// actual tokenizer instead of a fixed chars-per-token ratio.
+	ownMessages := sess.OwnMessages()
+	estimator := compaction.NewEstimator(func(yield func(*chat.Message) bool) {
+		for i := range ownMessages {
+			if !yield(&ownMessages[i].Message) {
+				return
+			}
+		}
+	})
+	newMessages := ownMessages[messageCountBefore:]
 	var addedTokens int64
-	for _, msg := range newMessages {
-		addedTokens += compaction.EstimateMessageTokens(&msg.Message)
+	for i := range newMessages {
+		addedTokens += estimator.EstimateMessageTokens(&newMessages[i].Message)
 	}
 
-	if !compaction.ShouldCompact(sess.InputTokens, sess.OutputTokens, addedTokens, contextLimit) {
+	if !compaction.ShouldCompact(sess.InputTokens, sess.OutputTokens, addedTokens, contextLimit, a.CompactionThreshold()) {
 		return
 	}
 
-	slog.InfoContext(ctx, "Proactive compaction: tool results pushed estimated context past 90%% threshold",
+	slog.InfoContext(ctx, "Proactive compaction: tool results pushed estimated context past the compaction threshold",
 		"agent", a.Name(),
 		"input_tokens", sess.InputTokens,
 		"output_tokens", sess.OutputTokens,
 		"added_estimated_tokens", addedTokens,
+		"estimator_scale", estimator.Scale(),
 		"estimated_total", sess.InputTokens+sess.OutputTokens+addedTokens,
 		"context_limit", contextLimit,
 	)

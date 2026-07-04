@@ -4,6 +4,7 @@ description: "docker-agent's default interface is a rich, interactive terminal U
 keywords: docker agent, ai agents, features, terminal ui (tui)
 linkTitle: "Terminal UI"
 weight: 10
+canonical: https://docs.docker.com/ai/docker-agent/features/tui/
 ---
 
 _docker-agent's default interface is a rich, interactive terminal UI with file attachments, themes, session management, and more._
@@ -73,13 +74,14 @@ Type `/` during a session to see available commands, or press <kbd>Ctrl</kbd>+<k
 | `/export`          | Export the session as HTML                                                           |
 | `/sessions`        | Browse and load past sessions                                                        |
 | `/model`           | Change the model for the current agent                                               |
-| `/effort`          | Set the current model's reasoning-effort level (`/effort <none\|minimal\|low\|medium\|high\|xhigh\|max>`, reasoning models only) |
+| `/effort`          | Set the current model's reasoning-effort level (`/effort <none\|minimal\|low\|medium\|high\|xhigh\|max>`, or `/effort` alone to pick from the supported levels; reasoning models only) |
 | `/theme`           | Change the color theme                                                               |
 | `/yolo`            | Toggle automatic tool call approval                                                  |
 | `/title`           | Set or regenerate session title                                                      |
 | `/attach`          | Attach a file to your message                                                        |
 | `/shell`           | Open a shell                                                                         |
 | `/star`            | Star/unstar the current session                                                      |
+| `/context`         | Show a context-window breakdown: estimated tokens per category (system prompt, tool definitions, prompt files, messages, tool results, compaction summary) |
 | `/cost`            | Show cost breakdown for this session                                                 |
 | `/eval`            | Create an evaluation report                                                          |
 | `/pause`           | Pause/resume the runtime loop. While the agent is mid-request, the resize handle shows "Pausing…" until the in-flight request completes; once the loop is blocked the indicator changes to "⏸ Paused". Run `/pause` again to resume. |
@@ -211,6 +213,7 @@ Each error message includes a clickable **↻ retry** button. Clicking it resume
 docker-agent automatically saves your sessions. Use `/sessions` to browse past conversations:
 
 - **Browse** past sessions with search and filtering
+- **Workspace grouping**: sessions started in the current directory are listed first under "This workspace", everything else under "Other locations" with its originating directory shown next to each entry; press <kbd>Ctrl</kbd>+<kbd>G</kbd> in the browser to cycle between all, current-directory only, and other-directory views. Restoring a session reopens it in its original directory, so the label always matches where a restore will land
 - **Star** important sessions with `/star`
 - **Branch** conversations by editing any previous user message — preserving the original session history
 - **Resume** sessions with `docker agent run config.yaml --session <id>`
