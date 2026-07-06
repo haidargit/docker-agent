@@ -199,6 +199,29 @@ $ docker agent models --provider openai
 $ docker agent models --format json | jq
 ```
 
+### `docker agent doctor`
+
+Diagnose the model and credential setup. Reports which model providers have credentials and where each credential comes from (shell environment, env file, pass, keychain, …), whether Docker Model Runner is reachable and which models are pulled, and which model the `auto` selection would pick. Secret values are never printed. Exits with a non-zero status when an issue would prevent an agent from running, which makes it usable in scripts and CI.
+
+```bash
+$ docker agent doctor [agent-file|registry-ref] [flags]
+```
+
+With an agent file, also lists the environment variables that file requires (model credentials and tool secrets such as `GITHUB_PERSONAL_ACCESS_TOKEN`), whether each one is set, and from which source.
+
+| Flag                     | Default | Description                                                    |
+| ------------------------ | ------- | -------------------------------------------------------------- |
+| `--json`                 | `false` | Output the full report in JSON format (for scripting).         |
+| `--env-from-file <file>` | (none)  | Also check variables supplied by an env file.                  |
+| `--models-gateway <url>` | (none)  | Diagnose against a models gateway (credentials come from it).  |
+
+```bash
+# Examples
+$ docker agent doctor                        # credential, DMR, and auto-selection state
+$ docker agent doctor ./agent.yaml           # also check that file's requirements
+$ docker agent doctor --json | jq .issues
+```
+
 ### `docker agent serve api`
 
 Start the HTTP API server for programmatic access. The argument can be a single agent file, a registry reference, or a directory — when given a directory, every `.yaml`/`.yml`/`.hcl` file in it is exposed as a separate entry under `/api/agents`.

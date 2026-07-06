@@ -5,16 +5,24 @@ import (
 	"github.com/docker/docker-agent/pkg/userconfig"
 )
 
-// NewDefaultProvider creates a provider chain with OS env, run secrets,
-// credential helper (if configured), Docker Desktop, pass, and keychain providers.
-// The whole chain is wrapped so that values shaped like "op://..." are resolved
-// as 1Password secret references through the `op` CLI.
+// Source is a labeled secret source in the default provider chain. The name
+// identifies where a value comes from (e.g. "environment", "keychain") so
+// diagnostic commands like `docker agent doctor` can report it.
+type Source struct {
+	Name     string
+	Provider Provider
+}
+
+// DefaultSources returns the ordered, labeled secret sources that make up the
+// default provider chain: OS env, run secrets, credential helper (if
+// configured), Docker Desktop, pass, and keychain. Lookup precedence is the
+// slice order.
 //
 // When running inside a Docker sandbox (detected via SANDBOX_VM_ID), a
 // [SandboxTokenProvider] is prepended so that DOCKER_TOKEN is read from the
 // JSON file written by the host-side token writer.
-func NewDefaultProvider() Provider {
-	var providers []Provider
+func DefaultSources() []Source {
+	var sources []Source
 
 	// Inside a sandbox the Docker Desktop backend API is unreachable and
 	// any DOCKER_TOKEN env var is a stale one-shot value.
@@ -22,32 +30,50 @@ func NewDefaultProvider() Provider {
 	// The host writes the token file into the config directory (mounted read-only
 	// into the sandbox), so we must read from GetConfigDir — not GetDataDir.
 	if InSandbox() {
-		providers = append(providers,
-			NewSandboxTokenProvider(SandboxTokensFilePath(paths.GetConfigDir())),
-		)
+		sources = append(sources, Source{
+			Name:     "sandbox-tokens",
+			Provider: NewSandboxTokenProvider(SandboxTokensFilePath(paths.GetConfigDir())),
+		})
 	}
 
-	providers = append(providers,
-		NewOsEnvProvider(),
-		NewRunSecretsProvider(),
+	sources = append(sources,
+		Source{Name: "environment", Provider: NewOsEnvProvider()},
+		Source{Name: "run-secrets", Provider: NewRunSecretsProvider()},
 	)
 
 	// Add credential helper provider if configured
 	if cfg, err := userconfig.Load(); err == nil && cfg.CredentialHelper != nil && cfg.CredentialHelper.Command != "" {
-		providers = append(providers, NewCredentialHelperProvider(cfg.CredentialHelper.Command, cfg.CredentialHelper.Args...))
+		sources = append(sources, Source{
+			Name:     "credential-helper",
+			Provider: NewCredentialHelperProvider(cfg.CredentialHelper.Command, cfg.CredentialHelper.Args...),
+		})
 	}
 
 	// Docker Desktop provider comes after credential helper
-	providers = append(providers, NewDockerDesktopProvider())
+	sources = append(sources, Source{Name: "docker-desktop", Provider: NewDockerDesktopProvider()})
 
 	// Append pass provider at the end if available
 	if passProvider, err := NewPassProvider(); err == nil {
-		providers = append(providers, passProvider)
+		sources = append(sources, Source{Name: "pass", Provider: passProvider})
 	}
 
 	// Append keychain provider if available
 	if keychainProvider, err := NewKeychainProvider(); err == nil {
-		providers = append(providers, keychainProvider)
+		sources = append(sources, Source{Name: "keychain", Provider: keychainProvider})
+	}
+
+	return sources
+}
+
+// NewDefaultProvider creates a provider chain from [DefaultSources].
+// The whole chain is wrapped so that values shaped like "op://..." are resolved
+// as 1Password secret references through the `op` CLI.
+func NewDefaultProvider() Provider {
+	sources := DefaultSources()
+
+	providers := make([]Provider, 0, len(sources))
+	for _, source := range sources {
+		providers = append(providers, source.Provider)
 	}
 
 	// Resolve any "op://" secret references through the 1Password CLI,

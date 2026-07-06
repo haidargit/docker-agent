@@ -1090,3 +1090,21 @@ func TestProviderAPIKeyEnvVars(t *testing.T) {
 	// Broad, general-purpose tokens must not be forwarded as model credentials.
 	assert.NotContains(t, vars, "GITHUB_TOKEN")
 }
+
+func TestCloudProviderEnvVars(t *testing.T) {
+	t.Parallel()
+
+	providers := CloudProviderEnvVars()
+
+	// Must mirror the auto-selection table: same providers, same priority
+	// order, same detection variables.
+	assert.Len(t, providers, len(cloudProviders))
+	for i, p := range providers {
+		assert.Equal(t, cloudProviders[i].name, p.Provider)
+		assert.Equal(t, cloudProviders[i].envVars, p.EnvVars)
+	}
+
+	// Mutating the returned slices must not corrupt the package table.
+	providers[0].EnvVars[0] = "MUTATED"
+	assert.NotEqual(t, "MUTATED", cloudProviders[0].envVars[0])
+}
