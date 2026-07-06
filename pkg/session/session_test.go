@@ -386,6 +386,11 @@ func TestMessageUnmarshalJSONAgentNameCompat(t *testing.T) {
 			want:  "new",
 		},
 		{
+			name:  "legacy wins over empty current key",
+			input: `{"agent_name":"","agentName":"old","message":{"role":"user","content":"hi"}}`,
+			want:  "old",
+		},
+		{
 			name:  "no agent name",
 			input: `{"message":{"role":"user","content":"hi"}}`,
 			want:  "",
@@ -402,6 +407,35 @@ func TestMessageUnmarshalJSONAgentNameCompat(t *testing.T) {
 			assert.Equal(t, "hi", msg.Message.Content)
 		})
 	}
+
+	t.Run("null leaves receiver untouched", func(t *testing.T) {
+		t.Parallel()
+
+		msg := Message{AgentName: "root", Message: chat.Message{Content: "hi"}}
+		require.NoError(t, json.Unmarshal([]byte(`null`), &msg))
+		assert.Equal(t, "root", msg.AgentName)
+		assert.Equal(t, "hi", msg.Message.Content)
+	})
+
+	t.Run("legacy session document", func(t *testing.T) {
+		t.Parallel()
+
+		// Mirrors a pre-rename session export as loaded by the evaluation package.
+		legacy := `{
+			"id": "41b179a2-ed19-4ae2-a45d-95775aaa90f7",
+			"messages": [
+				{"message": {"agentName": "", "message": {"role": "user", "content": "How many files?"}}},
+				{"message": {"agentName": "root", "message": {"role": "assistant", "content": "Two."}}}
+			]
+		}`
+
+		var sess Session
+		require.NoError(t, json.Unmarshal([]byte(legacy), &sess))
+		require.Len(t, sess.Messages, 2)
+		assert.Empty(t, sess.Messages[0].Message.AgentName)
+		assert.Equal(t, "root", sess.Messages[1].Message.AgentName)
+		assert.Equal(t, "Two.", sess.Messages[1].Message.Message.Content)
+	})
 
 	t.Run("marshal emits agent_name", func(t *testing.T) {
 		t.Parallel()
