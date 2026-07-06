@@ -74,6 +74,25 @@ var cloudProviders = []providerConfig{
 	{"opencode-go", []string{"OPENCODE_API_KEY"}, "OPENCODE_API_KEY", "OPENCODE_API_KEY"},
 }
 
+// ProviderEnvVars associates a cloud provider known to auto-selection with
+// the environment variables that can supply its credentials.
+type ProviderEnvVars struct {
+	Provider string
+	EnvVars  []string
+}
+
+// CloudProviderEnvVars returns, in auto-selection priority order, every cloud
+// provider with the environment variables that can hold its credentials.
+// Diagnostic commands (e.g. `docker agent doctor`) use it to report credential
+// state without duplicating the provider table.
+func CloudProviderEnvVars() []ProviderEnvVars {
+	out := make([]ProviderEnvVars, 0, len(cloudProviders))
+	for _, p := range cloudProviders {
+		out = append(out, ProviderEnvVars{Provider: p.name, EnvVars: slices.Clone(p.envVars)})
+	}
+	return out
+}
+
 // AutoModelFallbackError is returned when auto model selection fails because
 // no model could be initialized (no API keys configured and no usable Docker
 // Model Runner model, e.g. DMR not installed or the pull was declined).

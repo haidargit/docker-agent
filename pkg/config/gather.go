@@ -65,6 +65,15 @@ func GatherEnvVarsForModels(ctx context.Context, cfg *latest.Config, env environ
 	return gatherEnvVarsForModels(ctx, cfg, env, false)
 }
 
+// RequiredModelEnvVars returns the env vars the config's models need under
+// the given gateway configuration, mirroring the run-time preflight check:
+// every model credential when no models gateway is set, and only those of
+// models that bypass the gateway otherwise (the gateway supplies credentials
+// for routed models).
+func RequiredModelEnvVars(ctx context.Context, cfg *latest.Config, modelsGateway string, env environment.Provider) []string {
+	return gatherEnvVarsForModels(ctx, cfg, env, modelsGateway != "")
+}
+
 // gatherEnvVarsForModels collects the env vars required by model-backed agents.
 // When bypassOnly is true, only the leaf models that effectively dial their
 // provider directly (bypassing the models gateway) are inspected — used to
