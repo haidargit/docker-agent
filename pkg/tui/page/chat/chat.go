@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -785,8 +786,8 @@ func (p *chatPage) handleInlineEditCancelled(msg messages.InlineEditCancelledMsg
 }
 
 // extractAttachmentsFromSession extracts attachments from a session message at the given position.
-// Attachments are stored as text parts in MultiContent with format "Contents of <filename>: <dataURL>".
-// TODO(krisetto): meh we can store and retrieve attachments better in the session itself
+// Legacy attachments are stored as text parts in MultiContent with format "Contents of <filename>: <dataURL>".
+// New attachments are stored as Document parts.
 func (p *chatPage) extractAttachmentsFromSession(position int) []msgtypes.Attachment {
 	sess := p.app.Session()
 	if sess == nil || position < 0 || position >= len(sess.Messages) {
@@ -805,20 +806,35 @@ func (p *chatPage) extractAttachmentsFromSession(position int) []msgtypes.Attach
 	}
 
 	var attachments []msgtypes.Attachment
-	const prefix = "Contents of "
+	const legacyPrefix = "Contents of "
 
 	// Skip the first part (main text content), look for attachment parts
 	for i := 1; i < len(msg.MultiContent); i++ {
 		part := msg.MultiContent[i]
+
+		if part.Type == chat.MessagePartTypeDocument && part.Document != nil {
+			content := part.Document.Source.InlineText
+			if content == "" && len(part.Document.Source.InlineData) > 0 {
+				content = "data:" + part.Document.MimeType + ";base64," + base64.StdEncoding.EncodeToString(part.Document.Source.InlineData)
+			}
+			if content != "" {
+				attachments = append(attachments, msgtypes.Attachment{
+					Name:    part.Document.Name,
+					Content: content,
+				})
+			}
+			continue
+		}
+
 		if part.Type != chat.MessagePartTypeText {
 			continue
 		}
 		text := part.Text
-		if !strings.HasPrefix(text, prefix) {
+		if !strings.HasPrefix(text, legacyPrefix) {
 			continue
 		}
 		// Parse "Contents of <filename>: <dataURL>"
-		rest := text[len(prefix):]
+		rest := text[len(legacyPrefix):]
 		before, after, ok := strings.Cut(rest, ": ")
 		if !ok {
 			continue
