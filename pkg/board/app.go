@@ -154,16 +154,9 @@ func (a *App) Projects() []Project {
 // global config file. The path is normalized to an absolute path (expanding
 // a leading ~) so cards never depend on the board's working directory.
 func (a *App) AddProject(p Project) error {
-	if strings.TrimSpace(p.Name) == "" {
-		return errors.New("project name is required")
-	}
-	path, err := normalizeProjectPath(p.Path)
+	stored, err := a.validateProject(p)
 	if err != nil {
 		return err
-	}
-	p.Path = path
-	if !isGitRepo(a.ctx, p.Path) {
-		return fmt.Errorf("%s is not a git repository", p.Path)
 	}
 
 	a.mu.Lock()
@@ -172,18 +165,73 @@ func (a *App) AddProject(p Project) error {
 		a.config.Board = &userconfig.Board{}
 	}
 	for _, existing := range a.config.Board.Projects {
-		if existing.Name == p.Name {
-			return fmt.Errorf("project %q already exists", p.Name)
+		if existing.Name == stored.Name {
+			return fmt.Errorf("project %q already exists", stored.Name)
 		}
 	}
-	a.config.Board.Projects = append(a.config.Board.Projects, userconfig.BoardProject{
-		Name: p.Name,
-		// Stored ~-contracted so the shared config works across
-		// environments whose home differs (host vs. docker sandbox).
-		Path:  contractHome(p.Path),
-		Agent: p.Agent,
-	})
+	a.config.Board.Projects = append(a.config.Board.Projects, stored)
 	return a.saveConfigLocked()
+}
+
+// UpdateProject replaces the project named oldName with p, applying the
+// same validation as AddProject and persisting the change. Cards created
+// against the old name follow a rename; they keep the repo path and agent
+// they were created with.
+func (a *App) UpdateProject(oldName string, p Project) error {
+	stored, err := a.validateProject(p)
+	if err != nil {
+		return err
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var projects []userconfig.BoardProject
+	if a.config.Board != nil {
+		projects = a.config.Board.Projects
+	}
+	idx := slices.IndexFunc(projects, func(bp userconfig.BoardProject) bool { return bp.Name == oldName })
+	if idx < 0 {
+		return fmt.Errorf("unknown project %q", oldName)
+	}
+	if stored.Name != oldName {
+		for _, existing := range projects {
+			if existing.Name == stored.Name {
+				return fmt.Errorf("project %q already exists", stored.Name)
+			}
+		}
+	}
+	projects[idx] = stored
+	if err := a.saveConfigLocked(); err != nil {
+		return err
+	}
+	if stored.Name != oldName {
+		// Keep existing cards attached to their project across the rename
+		// (their accent color and header stay consistent).
+		if err := a.store.RenameProject(oldName, stored.Name); err != nil {
+			return err
+		}
+		a.onChanged()
+	}
+	return nil
+}
+
+// validateProject checks a project's name and path and returns its stored
+// form. The name is trimmed and the path is stored ~-contracted so the
+// shared config works across environments whose home differs (host vs.
+// docker sandbox).
+func (a *App) validateProject(p Project) (userconfig.BoardProject, error) {
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		return userconfig.BoardProject{}, errors.New("project name is required")
+	}
+	path, err := normalizeProjectPath(p.Path)
+	if err != nil {
+		return userconfig.BoardProject{}, err
+	}
+	if !isGitRepo(a.ctx, path) {
+		return userconfig.BoardProject{}, fmt.Errorf("%s is not a git repository", path)
+	}
+	return userconfig.BoardProject{Name: name, Path: contractHome(path), Agent: strings.TrimSpace(p.Agent)}, nil
 }
 
 // normalizeProjectPath expands a leading ~ and makes the path absolute. An
@@ -199,6 +247,31 @@ func normalizeProjectPath(path string) (string, error) {
 		return "", fmt.Errorf("resolve project path: %w", err)
 	}
 	return abs, nil
+}
+
+// MoveProject moves the named project delta positions in the list
+// (negative moves it up) and persists the new order. The destination is
+// clamped to the list, so moves past either end are safe no-ops. Project
+// order drives the accent colors and the new-card selector.
+func (a *App) MoveProject(name string, delta int) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var projects []userconfig.BoardProject
+	if a.config.Board != nil {
+		projects = a.config.Board.Projects
+	}
+	idx := slices.IndexFunc(projects, func(p userconfig.BoardProject) bool { return p.Name == name })
+	if idx < 0 {
+		return fmt.Errorf("unknown project %q", name)
+	}
+	dst := min(max(idx+delta, 0), len(projects)-1)
+	if dst == idx {
+		return nil
+	}
+	p := projects[idx]
+	projects = slices.Delete(projects, idx, idx+1)
+	a.config.Board.Projects = slices.Insert(projects, dst, p)
+	return a.saveConfigLocked()
 }
 
 // RemoveProject deletes a project by name and persists the change. Existing

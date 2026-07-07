@@ -84,10 +84,26 @@ type (
 		project board.Project
 		prompt  string
 	}
-	// submitProjectMsg adds a project from the projects dialog.
-	submitProjectMsg struct{ project board.Project }
+	// submitProjectMsg adds a project from the projects dialog, or updates
+	// the one named oldName when set.
+	submitProjectMsg struct {
+		project board.Project
+		oldName string
+	}
+	// projectSavedMsg means an add/update was validated and persisted; name
+	// is the saved project's name, oldName its previous name (empty on add).
+	projectSavedMsg struct {
+		name    string
+		oldName string
+	}
 	// deleteProjectMsg removes a project from the projects dialog.
 	deleteProjectMsg struct{ name string }
+	// moveProjectMsg reorders a project from the projects dialog; delta is
+	// the number of positions to move (negative moves it up).
+	moveProjectMsg struct {
+		name  string
+		delta int
+	}
 	// submitPromptMsg saves a column prompt from the prompt editor.
 	submitPromptMsg struct {
 		colID  string
@@ -394,15 +410,30 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case submitProjectMsg:
-		if err := m.app.AddProject(msg.project); err != nil {
-			cmd := m.setFlash(err.Error(), true)
-			return m, cmd
-		}
+		cmd := m.saveProject(msg.project, msg.oldName)
+		return m, cmd
+
+	case projectSavedMsg:
 		m.reload()
-		if d, ok := m.dialog.(*projectsDialog); ok {
-			d.setProjects(m.projects)
+		// A rename keeps the new-card dialog starting on the same project.
+		if msg.oldName != "" && m.lastProject == msg.oldName {
+			m.lastProject = msg.name
 		}
-		cmd := m.setFlash("Project added to the global config", false)
+		if d, ok := m.dialog.(*projectsDialog); ok {
+			if d.mode == projectsEditing {
+				d.setProjects(m.projects)
+			} else {
+				// The save is asynchronous and the user may have moved on:
+				// refresh without leaving the dialog's current view.
+				d.refreshProjects(m.projects)
+			}
+			d.selectProject(msg.name) // the cursor follows the saved project
+		}
+		action := "added to"
+		if msg.oldName != "" {
+			action = "updated in"
+		}
+		cmd := m.setFlash("Project "+action+" the global config", false)
 		return m, cmd
 
 	case deleteProjectMsg:
@@ -413,6 +444,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reload()
 		if d, ok := m.dialog.(*projectsDialog); ok {
 			d.setProjects(m.projects)
+		}
+		return m, nil
+
+	case moveProjectMsg:
+		if err := m.app.MoveProject(msg.name, msg.delta); err != nil {
+			cmd := m.setFlash(err.Error(), true)
+			return m, cmd
+		}
+		m.reload()
+		// Refresh without leaving the dialog's current view: the message is
+		// delivered asynchronously and the user may already have opened the
+		// edit form or the delete confirmation.
+		if d, ok := m.dialog.(*projectsDialog); ok {
+			d.refreshProjects(m.projects)
+			d.selectProject(msg.name) // the cursor follows the moved project
 		}
 		return m, nil
 
@@ -644,7 +690,8 @@ func (m *model) setFlash(text string, isErr bool) tea.Cmd {
 	return tea.Tick(4*time.Second, func(time.Time) tea.Msg { return clearFlashMsg{id: id} })
 }
 
-// --- engine commands (all engine calls that can block run in tea.Cmds) ---
+// --- engine commands (engine calls that can block — git, tmux, readiness
+// probes — run in tea.Cmds; plain config-file mutations run inline) ---
 
 func (m *model) createCard(project board.Project, prompt string) tea.Cmd {
 	return func() tea.Msg {
@@ -679,6 +726,23 @@ func (m *model) deleteCard(cardID string) tea.Cmd {
 			return flashMsg{text: err.Error(), isErr: true}
 		}
 		return flashMsg{text: "Card deleted, worktree and session cleaned up", isErr: false}
+	}
+}
+
+// saveProject adds or updates a project off the UI loop: validation spawns
+// a git subprocess and the config write hits the filesystem.
+func (m *model) saveProject(project board.Project, oldName string) tea.Cmd {
+	return func() tea.Msg {
+		var err error
+		if oldName == "" {
+			err = m.app.AddProject(project)
+		} else {
+			err = m.app.UpdateProject(oldName, project)
+		}
+		if err != nil {
+			return flashMsg{text: err.Error(), isErr: true}
+		}
+		return projectSavedMsg{name: project.Name, oldName: oldName}
 	}
 }
 

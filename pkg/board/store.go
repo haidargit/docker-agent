@@ -121,6 +121,25 @@ func (s *Store) InsertCard(c *Card) error {
 	return s.save()
 }
 
+// RenameProject rewrites the project name on every card that references
+// oldName, so a project rename keeps its cards attached. Saves only when a
+// card actually changed.
+func (s *Store) RenameProject(oldName, newName string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := false
+	for _, c := range s.cards {
+		if c.Project == oldName {
+			c.Project = newName
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return s.save()
+}
+
 // UpdateCardStatus persists only the status field of a card, so background
 // watchers holding a stale snapshot of the card cannot revert concurrent
 // edits. It reports whether the status actually changed.
