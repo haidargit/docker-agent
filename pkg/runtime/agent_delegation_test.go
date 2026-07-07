@@ -12,8 +12,8 @@ import (
 	"github.com/docker/docker-agent/pkg/agent"
 	"github.com/docker/docker-agent/pkg/session"
 	"github.com/docker/docker-agent/pkg/team"
-	agenttool "github.com/docker/docker-agent/pkg/tools/builtin/agent"
 	"github.com/docker/docker-agent/pkg/tools"
+	agenttool "github.com/docker/docker-agent/pkg/tools/builtin/agent"
 )
 
 func TestBuildTaskSystemMessage(t *testing.T) {
@@ -497,4 +497,3 @@ func TestTransferTask_PropagatesPermissions(t *testing.T) {
 	assert.Equal(t, []string{"safe_tool"}, parentClone.Allow,
 		"parent permissions must remain isolated from child mutations after transfer_task")
 }
-

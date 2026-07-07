@@ -396,7 +396,7 @@ func TestNewSQLiteSessionStore_DirectoryNotWritable(t *testing.T) {
 	err := os.Mkdir(readOnlyDir, 0o555)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		os.Chmod(readOnlyDir, 0o777)
+		_ = os.Chmod(readOnlyDir, 0o777)
 	})
 
 	_, err = NewSQLiteSessionStore(t.Context(), filepath.Join(readOnlyDir, "session.db"))
