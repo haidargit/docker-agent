@@ -8,6 +8,7 @@ package board
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -108,10 +109,19 @@ func newSessionName() string {
 
 // socketPath returns the unix socket a card's agent control plane listens
 // on. It is derived from the (unique) docker-agent session id, so it is
-// stable across board restarts and needs no extra storage. Kept short to
-// stay under the ~104-byte unix sun_path limit.
+// stable across board restarts and needs no extra storage. The socket lives
+// in the board's per-user socket dir (see socketDir) — not under the data
+// dir, whose bind mount into a docker sandbox cannot host unix sockets: the
+// agent would die at startup failing to bind --listen. Kept short to stay
+// under the ~104-byte unix sun_path limit.
 func socketPath(agentSession string) string {
-	return filepath.Join(paths.GetDataDir(), "run", "board-"+agentSession+".sock")
+	dir, err := socketDir()
+	if err != nil {
+		// The board cannot run at all when the socket dir is unusable (its
+		// tmux socket lives there too); keep the path deterministic anyway.
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, agentSession+".sock")
 }
 
 // worktreeDir returns the directory docker-agent creates for a worktree of

@@ -1,13 +1,31 @@
 package board
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/docker/docker-agent/pkg/paths"
 	"github.com/docker/docker-agent/pkg/userconfig"
 )
+
+// The data dir (~/.cagent) may be bind-mounted into a docker sandbox, where
+// unix sockets cannot be bound: an agent whose --listen socket lived there
+// would die at startup. Control-plane sockets must live in the board's
+// local, per-user socket dir instead.
+func TestSocketPathOutsideDataDir(t *testing.T) {
+	t.Parallel()
+
+	sock := socketPath("abc123")
+	assert.False(t, strings.HasPrefix(sock, paths.GetDataDir()+string(filepath.Separator)))
+
+	dir, err := socketDir()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "abc123.sock"), sock)
+}
 
 func TestPlaceholderTitle(t *testing.T) {
 	t.Parallel()
