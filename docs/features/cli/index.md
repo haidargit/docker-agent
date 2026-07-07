@@ -364,6 +364,18 @@ $ curl http://127.0.0.1:8083/v1/chat/completions \
 
 See [Chat Server](../chat-server/index.md) for the full feature reference.
 
+### `docker agent board`
+
+Launch a full-screen Kanban TUI for orchestrating multiple agents at once. Each card runs an agent in its own tmux session on an isolated git worktree; moving a card forward through the pipeline (Dev → Review → Push → Done) delivers the destination column's prompt to that card's agent. Projects and column prompts are stored in the global config file (`~/.config/cagent/config.yaml`) and can be managed from the TUI.
+
+```bash
+$ docker agent board
+```
+
+Takes no arguments or flags. Requires `tmux` and `git` to be installed.
+
+See [Kanban Board](../board/index.md) for key bindings, configuration, and workflow details.
+
 ### `docker agent share push` / `docker agent share pull`
 
 Share agents via OCI registries.
