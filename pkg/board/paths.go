@@ -30,10 +30,17 @@ func contractHome(path string) string {
 }
 
 // expandHome resolves a leading "~" against the current home directory.
-// Other paths are returned unchanged.
+// Other paths — and "~" paths when the home cannot be determined — are
+// returned unchanged, so a failed lookup can never turn a stored path into
+// a relative one (which a later save would persist, corrupting the shared
+// state).
 func expandHome(path string) string {
 	if path == "~" || strings.HasPrefix(path, "~/") {
-		return filepath.Join(paths.GetHomeDir(), strings.TrimPrefix(path[1:], "/"))
+		home := paths.GetHomeDir()
+		if home == "" {
+			return path
+		}
+		return filepath.Join(home, strings.TrimPrefix(path[1:], "/"))
 	}
 	return path
 }

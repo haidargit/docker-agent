@@ -51,6 +51,9 @@ func OpenStore(path string) (*Store, error) {
 	if err := json.Unmarshal(data, &s.cards); err != nil {
 		return nil, fmt.Errorf("parse board state %s: %w", path, err)
 	}
+	// Drop null entries (hand-edited or corrupted file) rather than panic;
+	// they carry no data worth preserving.
+	s.cards = slices.DeleteFunc(s.cards, func(c *Card) bool { return c == nil })
 	for _, c := range s.cards {
 		c.RepoPath = expandHome(c.RepoPath)
 		c.Worktree = expandHome(c.Worktree)

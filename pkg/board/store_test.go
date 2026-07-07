@@ -121,6 +121,21 @@ func TestStoreDeleteCard(t *testing.T) {
 	require.NoError(t, s.DeleteCard("c1"))
 }
 
+// TestOpenStoreSkipsNullCards proves a hand-edited or corrupted state file
+// containing null entries loads instead of panicking.
+func TestOpenStoreSkipsNullCards(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "cards.json")
+	require.NoError(t, os.WriteFile(path, []byte(`[null, {"id": "c1", "column": "dev"}]`), 0o644))
+
+	s, err := OpenStore(path)
+	require.NoError(t, err)
+	cards := s.ListCards()
+	require.Len(t, cards, 1)
+	assert.Equal(t, "c1", cards[0].ID)
+}
+
 // TestStorePortablePaths proves card paths under home are persisted
 // ~-contracted (so shared state files work across environments with
 // different home directories) and expanded again on load.

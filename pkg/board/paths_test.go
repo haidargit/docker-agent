@@ -36,6 +36,17 @@ func TestExpandHome(t *testing.T) {
 	assert.Equal(t, "~user/src", expandHome("~user/src"))
 }
 
+// TestExpandHomeNoHome proves a failed home lookup leaves "~" paths
+// untouched instead of turning them into relative paths that a later save
+// would persist.
+func TestExpandHomeNoHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+
+	assert.Equal(t, "~/src/repo", expandHome("~/src/repo"))
+	assert.Equal(t, "~", expandHome("~"))
+}
+
 func TestContractExpandRoundTrip(t *testing.T) {
 	t.Parallel()
 
