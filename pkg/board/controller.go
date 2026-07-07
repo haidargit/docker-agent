@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -28,6 +29,12 @@ const (
 	// readyProbeTimeout bounds the control-plane probe behind "attach" so
 	// the user gets quick feedback instead of hanging.
 	readyProbeTimeout = 2 * time.Second
+	// maxLaunchFailures is how many times in a row the watcher relaunches an
+	// agent that dies before its control plane ever answers. Past it, the
+	// agent is crashing deterministically (bad config, missing key…):
+	// relaunching again would only kill the dead pane holding the error
+	// output, so the watcher goes red and leaves the pane for inspection.
+	maxLaunchFailures = 3
 )
 
 // controller keeps each card in sync with its agent's control plane. One
@@ -141,6 +148,10 @@ func (c *controller) Stop(cardID string) {
 // then tail events; on a drop, reconnect; if the agent is gone, relaunch and
 // resume.
 func (c *controller) watch(ctx context.Context, cardID string) {
+	// launchFailures counts consecutive attempts where the agent died
+	// without its control plane ever answering. Reset by a successful
+	// snapshot.
+	launchFailures := 0
 	for ctx.Err() == nil {
 		card, err := c.store.GetCard(cardID)
 		if errors.Is(err, ErrCardNotFound) {
@@ -160,15 +171,27 @@ func (c *controller) watch(ctx context.Context, cardID string) {
 		if err != nil {
 			// The control plane is unreachable. If the agent's tmux pane is
 			// gone, relaunch to resume; otherwise it is still starting, so
-			// just wait and retry.
+			// just wait and retry. An agent that keeps dying before ever
+			// answering is crashing at startup: surface the failure instead
+			// of silently relaunching forever, and stop killing the dead
+			// pane so the user can attach and read the agent's last output.
 			if alive, aerr := c.sessions.Alive(card.Session); aerr == nil && !alive {
-				_ = c.relaunch(card, "")
+				launchFailures++
+				if launchFailures >= maxLaunchFailures {
+					c.setStatus(cardID, StatusError)
+				} else if rerr := c.relaunch(card, ""); rerr != nil && !errors.Is(rerr, ErrCardNotFound) {
+					// The session cannot even be recreated (tmux failure,
+					// missing worktree…): show the card as failed rather
+					// than leaving it "starting" forever.
+					c.setStatus(cardID, StatusError)
+				}
 			}
 			if sleep(ctx, retryDelay) {
 				return
 			}
 			continue
 		}
+		launchFailures = 0
 
 		if snap.Title != "" {
 			c.setTitle(cardID, snap.Title)
@@ -297,7 +320,9 @@ func (c *controller) watch(ctx context.Context, cardID string) {
 
 		if exited && ctx.Err() == nil {
 			// The agent process ended; resume it so the card stays usable.
-			_ = c.relaunch(card, "")
+			if rerr := c.relaunch(card, ""); rerr != nil && !errors.Is(rerr, ErrCardNotFound) {
+				c.setStatus(cardID, StatusError)
+			}
 		}
 		if sleep(ctx, retryDelay) {
 			return
@@ -388,9 +413,18 @@ func (c *controller) relaunch(card *Card, prompt string) error {
 	// so the resumed run can bind --listen; otherwise the new agent fails to
 	// start and the card stays stuck "starting".
 	_ = os.Remove(socket)
+	// docker agent creates the worktree on the first launch; if that launch
+	// died before it did, resuming from the worktree directory would fail.
+	// Launch from the repository again so --worktree (re)creates it.
+	workDir, worktreeName, worktreeBase := card.Worktree, "", ""
+	if _, statErr := os.Stat(card.Worktree); statErr != nil {
+		workDir = card.RepoPath
+		worktreeName = filepath.Base(card.Worktree)
+		worktreeBase = upstreamBase(c.ctx, card.RepoPath)
+	}
 	err := c.sessions.NewSession(
-		card.Session, card.Worktree, card.Agent, card.AgentSession,
-		socket, "", "", prompt,
+		card.Session, workDir, card.Agent, card.AgentSession,
+		socket, worktreeName, worktreeBase, prompt,
 	)
 	if err == nil {
 		// The agent is launching again: show it as starting until its

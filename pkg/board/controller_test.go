@@ -2,6 +2,9 @@ package board
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -256,4 +259,126 @@ func TestControllerStopWaits(t *testing.T) {
 	// Stopping twice (or a never-watched card) is safe.
 	c.Stop("c1")
 	c.Stop("unknown")
+}
+
+// downClient simulates an agent whose control plane never comes up.
+type downClient struct{}
+
+func (downClient) Snapshot(context.Context) (snapshot, error) {
+	return snapshot{}, errors.New("connection refused")
+}
+
+func (downClient) StreamEvents(context.Context, uint64, func(event) bool) error {
+	return errors.New("connection refused")
+}
+
+func (downClient) Followup(context.Context, string, string) error {
+	return errors.New("connection refused")
+}
+
+// crashingSessions simulates an agent that dies at startup: the session is
+// never alive, and creating a new one optionally fails too.
+type crashingSessions struct {
+	newErr      error
+	newSessions atomic.Int32
+}
+
+func (s *crashingSessions) NewSession(_, _, _, _, _, _, _, _ string) error {
+	s.newSessions.Add(1)
+	return s.newErr
+}
+func (s *crashingSessions) KillSession(string) error   { return nil }
+func (s *crashingSessions) Alive(string) (bool, error) { return false, nil }
+
+// watchCrashingCard spins up a watcher for a card whose agent never answers
+// and whose tmux pane is dead, simulating a startup crash.
+func watchCrashingCard(t *testing.T, sessions *crashingSessions) *Store {
+	t.Helper()
+	store := testStore(t)
+	require.NoError(t, store.InsertCard(&Card{ID: "c1", Column: "dev", Status: StatusStarting, Session: "s", Worktree: t.TempDir()}))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	c := newController(ctx, store, sessions, func() {})
+	c.clientFor = func(_, _ string) sessionClient { return downClient{} }
+	card, err := store.GetCard("c1")
+	require.NoError(t, err)
+	c.Start(card)
+	t.Cleanup(func() { c.Stop("c1") })
+	return store
+}
+
+func TestControllerStartupCrashLoopGoesRed(t *testing.T) {
+	t.Parallel()
+
+	// The agent dies before its control plane ever answers, relaunch after
+	// relaunch: the watcher must surface the failure instead of silently
+	// relaunching forever with the card stuck "starting".
+	sessions := &crashingSessions{}
+	store := watchCrashingCard(t, sessions)
+	waitForStatus(t, store, StatusError)
+	// Relaunches stop at the cap, preserving the dead pane's error output.
+	assert.Equal(t, int32(maxLaunchFailures-1), sessions.newSessions.Load())
+}
+
+func TestControllerFailedRelaunchGoesRed(t *testing.T) {
+	t.Parallel()
+
+	// The session cannot even be recreated (e.g. tmux new-session fails):
+	// the card must go red, not stay "starting" forever.
+	sessions := &crashingSessions{newErr: errors.New("tmux: bad working directory")}
+	store := watchCrashingCard(t, sessions)
+	waitForStatus(t, store, StatusError)
+}
+
+// argSessions records the arguments of the last NewSession call.
+type argSessions struct {
+	workDir, worktreeName, worktreeBase string
+}
+
+func (s *argSessions) NewSession(_, workDir, _, _, _, worktreeName, worktreeBase, _ string) error {
+	s.workDir, s.worktreeName, s.worktreeBase = workDir, worktreeName, worktreeBase
+	return nil
+}
+func (s *argSessions) KillSession(string) error   { return nil }
+func (s *argSessions) Alive(string) (bool, error) { return false, nil }
+
+func TestRelaunchRecreatesMissingWorktree(t *testing.T) {
+	t.Parallel()
+
+	// The first launch died before docker-agent created the worktree:
+	// relaunching from the (missing) worktree directory would fail, so the
+	// relaunch goes back to the repository and recreates the worktree.
+	store := testStore(t)
+	repo := t.TempDir()
+	wt := filepath.Join(t.TempDir(), "board-abc")
+	require.NoError(t, store.InsertCard(&Card{ID: "c1", Session: "s", RepoPath: repo, Worktree: wt}))
+
+	sessions := &argSessions{}
+	c := newController(t.Context(), store, sessions, func() {})
+	card, err := store.GetCard("c1")
+	require.NoError(t, err)
+
+	require.NoError(t, c.relaunch(card, ""))
+	assert.Equal(t, repo, sessions.workDir)
+	assert.Equal(t, "board-abc", sessions.worktreeName)
+	assert.NotEmpty(t, sessions.worktreeBase)
+}
+
+func TestRelaunchResumesFromExistingWorktree(t *testing.T) {
+	t.Parallel()
+
+	store := testStore(t)
+	wt := t.TempDir()
+	require.NoError(t, store.InsertCard(&Card{ID: "c1", Session: "s", RepoPath: t.TempDir(), Worktree: wt}))
+
+	sessions := &argSessions{}
+	c := newController(t.Context(), store, sessions, func() {})
+	card, err := store.GetCard("c1")
+	require.NoError(t, err)
+
+	require.NoError(t, c.relaunch(card, ""))
+	assert.Equal(t, wt, sessions.workDir)
+	assert.Empty(t, sessions.worktreeName)
 }

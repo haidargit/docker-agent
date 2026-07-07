@@ -368,14 +368,16 @@ var ErrAgentStarting = errors.New("the agent is still starting")
 // AttachCommand returns the command that attaches the caller's terminal to
 // the card's agent session. It fails with [ErrAgentStarting] until the
 // agent's control plane answers, so the user never lands on a bare launch
-// command. Before attaching, the session's header row is refreshed with the
+// command. An errored card is attachable regardless: its agent may have
+// died at startup, and the dead pane holds the error output the user needs
+// to read. Before attaching, the session's header row is refreshed with the
 // card's current title and project.
 func (a *App) AttachCommand(cardID string) (*exec.Cmd, error) {
 	card, err := a.store.GetCard(cardID)
 	if err != nil {
 		return nil, err
 	}
-	if !a.controller.Ready(card) {
+	if card.Status != StatusError && !a.controller.Ready(card) {
 		return nil, ErrAgentStarting
 	}
 	socket, err := TmuxSocketPath()
