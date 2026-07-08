@@ -377,6 +377,48 @@ settings:
 
 This model is used when you run `docker agent run` without a config file.
 
+### Get Desktop Notifications with Hooks
+
+Long-running agents shouldn't require staring at the terminal. Add [global hooks](../../configuration/hooks/index.md#global-user-level-hooks) to your user config so every agent notifies you when it needs attention or finishes:
+
+```yaml
+# ~/.config/cagent/config.yaml
+settings:
+  hooks:
+    # Agent is waiting for your input (question, approval prompt, ...)
+    on_user_input:
+      - type: command
+        command: osascript -e 'display notification "Agent needs your input" with title "docker-agent"'
+
+    # Agent finished responding
+    stop:
+      - type: command
+        command: osascript -e 'display notification "Task finished" with title "docker-agent"'
+```
+
+On Linux, replace `osascript` with `notify-send`:
+
+```yaml
+command: notify-send "docker-agent" "Agent needs your input"
+```
+
+To also get alerted on errors and warnings, hook the `notification` event and read the message from the JSON payload on stdin:
+
+```yaml
+settings:
+  hooks:
+    notification:
+      - type: command
+        timeout: 10
+        command: |
+          MESSAGE=$(cat | jq -r '.notification_message // "Agent error"')
+          osascript -e "display notification \"$MESSAGE\" with title \"docker-agent\""
+```
+
+If a sound is enough, set `settings: { sound: true }` instead — docker-agent plays a notification sound when a task that ran longer than `sound_threshold` seconds (default 10) succeeds or fails.
+
+See the [Hooks documentation](../../configuration/hooks/index.md) for the full list of events and their payloads.
+
 ### GitHub PR Reviewer Example
 
 Use docker-agent as a GitHub Actions PR reviewer:
