@@ -112,7 +112,7 @@ Exits with a non-zero status when an issue would prevent an agent from running.`
   docker-agent doctor ./agent.yaml
   docker-agent doctor --json`,
 		Args:         cobra.MaximumNArgs(1),
-		GroupID:      "core",
+		GroupID:      "diagnose",
 		SilenceUsage: true,
 		ValidArgsFunction: func(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			if len(args) == 0 {

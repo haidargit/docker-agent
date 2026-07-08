@@ -42,7 +42,7 @@ Optionally provide a description as an argument to skip the initial prompt.`,
 		Example: `  docker-agent new
   docker-agent new "a web scraper that extracts product prices"
   docker-agent new --model openai/gpt-4o "a code reviewer agent"`,
-		GroupID: "core",
+		GroupID: "advanced",
 		RunE:    flags.runNewCommand,
 	}
 

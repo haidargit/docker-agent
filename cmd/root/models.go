@@ -70,7 +70,7 @@ func newModelsCmd(opts ...modelsCmdOption) *cobra.Command {
 Shows models that can be passed to 'docker agent run --model' or
 'docker agent new --model'. By default shows models from providers
 you have credentials for. Use --all to include all providers.`,
-		GroupID: "core",
+		GroupID: "diagnose",
 	}
 
 	listCmd := newModelsListCmd(opts...)

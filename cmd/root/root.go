@@ -167,6 +167,7 @@ We collect anonymous usage data to help improve docker agent. To disable:
 	// Define groups
 	cmd.AddGroup(
 		&cobra.Group{ID: "core", Title: "Core Commands:"},
+		&cobra.Group{ID: "diagnose", Title: "Diagnose Commands:"},
 		&cobra.Group{ID: "advanced", Title: "Advanced Commands:"},
 	)
 
