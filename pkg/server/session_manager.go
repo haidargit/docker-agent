@@ -648,7 +648,13 @@ func (sm *SessionManager) RunSession(ctx context.Context, sessionID, agentFilena
 		cancel()
 		return nil, ErrSessionBusy
 	}
-	runtimeSession.cancel = cancel
+	// Track the current stream's cancel so DeleteSession aborts it — but only
+	// for server-owned entries. Attached runtimes (done != nil) keep their
+	// attach-lifetime cancel: DELETE must cancel the attach context, not the
+	// in-flight stream, which WaitStopped waits on to end naturally.
+	if runtimeSession.done == nil {
+		runtimeSession.cancel = cancel
+	}
 
 	// Apply the model override (if any) before persisting the user
 	// messages so that an invalid ref does not leave an orphaned user
@@ -875,7 +881,11 @@ func (sm *SessionManager) recallSession(ctx context.Context, sessionID string, m
 		return err
 	}
 	rt.session = sess
-	rt.cancel = runCancel
+	// Same rule as RunSession: never clobber an attached runtime's
+	// attach-lifetime cancel with a per-stream cancel.
+	if rt.done == nil {
+		rt.cancel = runCancel
+	}
 	sm.mux.Unlock()
 
 	go func() {
