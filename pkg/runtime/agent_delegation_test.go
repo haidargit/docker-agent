@@ -472,4 +472,3 @@ func TestTransferTask_PropagatesPermissions(t *testing.T) {
 	assert.Equal(t, []string{"safe_tool"}, parentClone.Allow,
 		"parent permissions must remain isolated from child mutations after transfer_task")
 }
-
