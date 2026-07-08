@@ -145,6 +145,24 @@ func TestDragAndDropMovesCard(t *testing.T) {
 	assert.Empty(t, m.lastClickCard, "a drag must not arm double-click attach")
 }
 
+func TestDraggedCardRendersFaded(t *testing.T) {
+	t.Parallel()
+
+	m := dragTestModel()
+	card := m.cards["dev"][0]
+
+	idle := m.renderCard(card, 30, true)
+	m.dragCardID, m.dragging = card.ID, true
+	assert.NotEqual(t, idle, m.renderCard(card, 30, true),
+		"the dragged card must be visually distinct")
+
+	// Other cards keep their normal look while a drag is in progress.
+	other := m.cards["dev"][1]
+	during := m.renderCard(other, 30, false)
+	m.resetDrag()
+	assert.Equal(t, during, m.renderCard(other, 30, false))
+}
+
 func TestDragBackToOriginIsANoop(t *testing.T) {
 	t.Parallel()
 
@@ -164,13 +182,16 @@ func TestDragJitterWithinCardStaysAClick(t *testing.T) {
 	m := dragTestModel()
 	_, _ = m.handleClick(tea.MouseClickMsg{X: 5, Y: 5, Button: tea.MouseLeft})
 
-	// Motion within the pressed card does not start a drag…
+	// Motion within the pressed card starts the drag right away, so the
+	// pickup is visible without waiting for the pointer to leave the card…
 	m.handleMotion(tea.MouseMotionMsg{X: 6, Y: 6, Button: tea.MouseLeft})
-	assert.False(t, m.dragging)
+	assert.True(t, m.dragging)
 
-	// …so the release is a plain click and double-click stays armed.
+	// …but releasing back on the same card is a plain click and
+	// double-click stays armed.
 	_, cmd := m.handleRelease(tea.MouseReleaseMsg{X: 6, Y: 6, Button: tea.MouseLeft})
 	assert.Nil(t, cmd)
+	assert.False(t, m.dragging)
 	assert.Equal(t, "a", m.lastClickCard)
 }
 

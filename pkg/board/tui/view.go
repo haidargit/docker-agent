@@ -306,10 +306,26 @@ func (m *model) renderColumn(idx int, col board.Column, colWidth, boardHeight in
 		Render(strings.Join(lines, "\n"))
 }
 
+// dragFade is how much a dragged card's colors blend toward the
+// background: enough to clearly read as "in flight", still legible.
+const dragFade = 0.55
+
+// blend interpolates c1 toward c2 by the given fraction (0..1).
+func blend(c1, c2 color.Color, f float64) color.Color {
+	r1, g1, b1 := styles.ColorToRGB(c1)
+	r2, g2, b2 := styles.ColorToRGB(c2)
+	return styles.RGBToColor(r1+(r2-r1)*f, g1+(g2-g1)*f, b1+(b2-b1)*f)
+}
+
 // darken scales a color towards black by the given fraction (0..1).
 func darken(c color.Color, f float64) color.Color {
-	r, g, b := styles.ColorToRGB(c)
-	return styles.RGBToColor(r*(1-f), g*(1-f), b*(1-f))
+	return blend(c, lipgloss.Color("#000000"), f)
+}
+
+// fade blends a color toward the theme background, approximating the
+// transparency of a dragged card on terminals that cannot alpha-blend.
+func fade(c color.Color) color.Color {
+	return blend(c, styles.Background, dragFade)
 }
 
 // columnHeaderColor interpolates a column's rule color from the theme's
@@ -359,6 +375,15 @@ func (m *model) renderCard(card *board.Card, colInnerWidth int, selected bool) s
 		borderColor = styles.BorderPrimary
 	}
 
+	// The card being dragged fades toward the background — a visible
+	// "picked up" state while the pointer carries it to another column.
+	dragged := m.dragging && card.ID == m.dragCardID
+	if dragged {
+		titleStyle = titleStyle.Foreground(fade(titleStyle.GetForeground()))
+		accent = fade(accent)
+		borderColor = fade(borderColor)
+	}
+
 	title1, title2 := splitTitle(sanitize(card.Title), textWidth)
 	project := styles.BaseStyle.Foreground(accent).Render(toolcommon.TruncateText(sanitize("◆ "+card.Project), textWidth))
 
@@ -366,7 +391,7 @@ func (m *model) renderCard(card *board.Card, colInnerWidth int, selected bool) s
 		titleStyle.Render(title1),
 		titleStyle.Render(title2),
 		project,
-		m.renderStatus(card.Status, textWidth),
+		m.renderStatus(card.Status, textWidth, dragged),
 	}, "\n")
 
 	return styles.BaseStyle.
@@ -412,8 +437,12 @@ func statusColor(status board.CardStatus) color.Color {
 	}
 }
 
-func (m *model) renderStatus(status board.CardStatus, width int) string {
-	style := styles.BaseStyle.Foreground(statusColor(status))
+func (m *model) renderStatus(status board.CardStatus, width int, faded bool) string {
+	fg := statusColor(status)
+	if faded {
+		fg = fade(fg)
+	}
+	style := styles.BaseStyle.Foreground(fg)
 	spinner := spinnerFrames[m.frame%len(spinnerFrames)]
 	switch status {
 	case board.StatusStarting, board.StatusLoading, board.StatusAttaching:

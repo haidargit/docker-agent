@@ -739,18 +739,13 @@ func (m *model) handleClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleMotion tracks a pressed card being dragged. Cell-motion mode only
-// reports motion while a button is held, so motion after a card press
-// means a drag; the column under the pointer becomes the drop target.
+// reports motion while a button is held, so any motion after a card press
+// starts the drag — the card fades immediately — and the column under the
+// pointer becomes the drop target. Jitter is sorted out on release: a drop
+// back on the pressed card stays a plain click (see handleRelease).
 func (m *model) handleMotion(msg tea.MouseMotionMsg) {
 	if m.dragCardID == "" || msg.Button != tea.MouseLeft {
 		return
-	}
-	// Jitter within the pressed card stays a click (double-click keeps
-	// working): the drag starts once the pointer leaves the card.
-	if !m.dragging {
-		if col, row, ok := m.cardAt(msg.X, msg.Y); ok && col == m.selCol && row == m.selRow {
-			return
-		}
 	}
 	m.dragging = true
 	if col, ok := m.columnAt(msg.X, msg.Y); ok {
@@ -761,8 +756,9 @@ func (m *model) handleMotion(msg tea.MouseMotionMsg) {
 }
 
 // handleRelease completes a drag-and-drop: dropping a card on another
-// column moves it there. A release without prior motion is a plain click,
-// already handled by handleClick.
+// column moves it there. A release without prior motion, or back on the
+// pressed card itself, is a plain click — jitter while pressed must not
+// break double-click-to-attach.
 func (m *model) handleRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) {
 	if msg.Button != tea.MouseLeft {
 		return m, nil
@@ -771,6 +767,9 @@ func (m *model) handleRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) {
 	m.resetDrag()
 	if !wasDragging {
 		return m, nil
+	}
+	if col, row, ok := m.cardAt(msg.X, msg.Y); ok && m.cards[m.columns[col].ID][row].ID == cardID {
+		return m, nil // dropped where it was picked up: a click
 	}
 	m.lastClickCard = "" // a completed drag must not arm double-click
 	if col, ok := m.columnAt(msg.X, msg.Y); ok {
