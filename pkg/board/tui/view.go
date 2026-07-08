@@ -344,11 +344,12 @@ func busyCount(cards []*board.Card) int {
 func (m *model) renderCard(card *board.Card, colInnerWidth int, selected bool) string {
 	textWidth := max(colInnerWidth-4, 1) // card border + padding
 
-	// Cards carry their project's accent color on the border and badge, so
-	// each project's work is recognizable at a glance.
+	// Like the web board, a card's border carries its status color; the
+	// project badge keeps the project's accent so its work is still
+	// recognizable at a glance.
 	accent := m.projectColor(card.Project)
 	titleStyle := styles.BaseStyle
-	borderColor := accent
+	borderColor := statusColor(card.Status)
 	if selected {
 		titleStyle = styles.HighlightWhiteStyle
 		borderColor = styles.BorderPrimary
@@ -390,19 +391,37 @@ func splitTitle(title string, width int) (string, string) {
 	return toolcommon.TruncateText(line1, width), ""
 }
 
+// statusColor matches the web board's card tinting: starting=blue,
+// running=orange, paused=white, error=red, waiting=green.
+func statusColor(status board.CardStatus) color.Color {
+	switch status {
+	case board.StatusStarting, board.StatusLoading, board.StatusAttaching:
+		return styles.Info
+	case board.StatusRunning:
+		return styles.Warning
+	case board.StatusPaused:
+		return styles.White
+	case board.StatusError:
+		return styles.Error
+	default: // waiting
+		return styles.Success
+	}
+}
+
 func (m *model) renderStatus(status board.CardStatus, width int) string {
+	style := styles.BaseStyle.Foreground(statusColor(status))
 	spinner := spinnerFrames[m.frame%len(spinnerFrames)]
 	switch status {
 	case board.StatusStarting, board.StatusLoading, board.StatusAttaching:
-		return styles.WarningStyle.Render(toolcommon.TruncateText(spinner+" "+string(status), width))
+		return style.Render(toolcommon.TruncateText(spinner+" "+string(status), width))
 	case board.StatusRunning:
-		return styles.InfoStyle.Render(toolcommon.TruncateText(spinner+" running", width))
+		return style.Render(toolcommon.TruncateText(spinner+" running", width))
 	case board.StatusPaused:
-		return styles.WarningStyle.Render(toolcommon.TruncateText("∥ paused", width))
+		return style.Render(toolcommon.TruncateText("∥ paused", width))
 	case board.StatusError:
-		return styles.ErrorStyle.Render(toolcommon.TruncateText("✗ failed", width))
+		return style.Render(toolcommon.TruncateText("✗ failed", width))
 	default: // waiting
-		return styles.SuccessStyle.Render(toolcommon.TruncateText("● ready", width))
+		return style.Render(toolcommon.TruncateText("● ready", width))
 	}
 }
 
