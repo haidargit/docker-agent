@@ -671,10 +671,12 @@ func (m *agentPickerModel) leanCheckboxAt(x, y int) bool {
 // leanCheckbox renders the "Lean Mode" checkbox line.
 func (m *agentPickerModel) leanCheckbox() string {
 	box := styles.MutedStyle.Render("[ ]")
+	label := styles.SecondaryStyle.Render("Lean Mode")
 	if m.leanMode {
 		box = styles.SuccessStyle.Render("[x]")
+		label = styles.HighlightWhiteStyle.Render("Lean Mode")
 	}
-	return box + " " + styles.SecondaryStyle.Render("Lean Mode")
+	return box + " " + label
 }
 
 // agentPickerBoardGap separates the lean checkbox from the board button on
@@ -685,7 +687,7 @@ const agentPickerBoardGap = "   "
 // boardButton renders the "Open Board" button. Choosing it starts
 // `docker agent board` instead of running an agent.
 func (m *agentPickerModel) boardButton() string {
-	return styles.SecondaryStyle.Render("[ Open Board ]")
+	return styles.MutedStyle.Render("[ ") + styles.HighlightWhiteStyle.Render("Open Board") + styles.MutedStyle.Render(" ]")
 }
 
 // boardButtonAt reports whether terminal coordinates land on the "Open
@@ -870,10 +872,12 @@ func displayRef(ref string) string {
 func (m *agentPickerModel) renderCard(choice agentChoice, cardWidth int, selected bool) string {
 	marker := "  "
 	nameStyle := styles.BoldStyle
+	border := lipgloss.RoundedBorder()
 	borderColor := styles.BorderMuted
 	if selected {
 		marker = styles.SuccessStyle.Render("❯ ")
 		nameStyle = styles.HighlightWhiteStyle
+		border = lipgloss.ThickBorder()
 		borderColor = styles.BorderPrimary
 	}
 
@@ -903,7 +907,7 @@ func (m *agentPickerModel) renderCard(choice agentChoice, cardWidth int, selecte
 	card := lipgloss.JoinVertical(lipgloss.Left, header, "  "+detail, "  "+renderTags(choice.tags, detailWidth))
 
 	return styles.BaseStyle.
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(borderColor).
 		Width(cardWidth).
 		Padding(0, 1).
