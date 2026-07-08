@@ -326,7 +326,7 @@ func TestAgentPickerWindowing(t *testing.T) {
 	}
 	m := newAgentPickerModel(choices)
 	m.width = 120
-	m.height = 30 // fits (30-12)/7 = 2 cards
+	m.height = 22 // fits (22-12)/5 = 2 cards
 
 	assert.Equal(t, 2, m.visibleCount())
 
@@ -794,7 +794,7 @@ func TestAgentPickerBoardButtonWindowed(t *testing.T) {
 	}
 	m := newAgentPickerModel(choices)
 	m.width = 120
-	m.height = 30 // fits 2 cards
+	m.height = 22 // fits 2 cards
 	for range 5 {
 		m.moveDown()
 	}

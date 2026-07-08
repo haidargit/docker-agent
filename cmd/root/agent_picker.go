@@ -571,9 +571,8 @@ const (
 	agentPickerMinCardWidth = 24
 
 	// agentPickerCardHeight is the rendered height of a card: 3 content rows
-	// (header + detail + tags) wrapped by one row of vertical padding and a
-	// border on the top and bottom.
-	agentPickerCardHeight = 7
+	// (header + detail + tags) plus a border on the top and bottom.
+	agentPickerCardHeight = 5
 
 	// agentPickerCardGap is the number of blank rows between adjacent cards.
 	agentPickerCardGap = 0
@@ -901,7 +900,7 @@ func (m *agentPickerModel) renderCard(choice agentChoice, cardWidth int, selecte
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Width(cardWidth).
-		Padding(1, 1).
+		Padding(0, 1).
 		Render(card)
 }
 
