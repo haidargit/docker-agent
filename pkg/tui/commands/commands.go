@@ -389,7 +389,7 @@ func builtInSettingsCommands() []Item {
 			ID:           "settings.customize",
 			Label:        "Customize Layout",
 			SlashCommand: "/custom",
-			Description:  "Customize the layout: sidebar position and visible sections",
+			Description:  "Customize the layout: sidebar position, section spacing, and visible sections",
 			Category:     "Settings",
 			Immediate:    true,
 			Execute: func(string) tea.Cmd {

@@ -27,6 +27,7 @@ const (
 // customizeRows enumerates the selectable rows of the customize dialog.
 const (
 	rowPosition = iota
+	rowSpacing
 	rowUsage
 	rowAgents
 	rowTools
@@ -50,10 +51,24 @@ var positionLabels = map[messages.SidebarPosition]string{
 	messages.SidebarBottom: "Bottom",
 }
 
-// customizeDialog lets the user customize the TUI layout: sidebar position
-// and which sidebar sections are visible. Changes are previewed live (both in
-// the schematic and in the UI behind the dialog); Enter persists them, Esc
-// restores the original layout.
+// sectionSpacings is the ←/→ cycle order of the section-spacing selector.
+var sectionSpacings = []messages.SectionSpacing{
+	messages.SpacingCompact,
+	messages.SpacingNormal,
+	messages.SpacingRelaxed,
+}
+
+// spacingLabels maps spacings to their display labels.
+var spacingLabels = map[messages.SectionSpacing]string{
+	messages.SpacingCompact: "Compact",
+	messages.SpacingNormal:  "Normal",
+	messages.SpacingRelaxed: "Relaxed",
+}
+
+// customizeDialog lets the user customize the TUI layout: sidebar position,
+// spacing between sidebar sections, and which sections are visible. Changes
+// are previewed live (both in the schematic and in the UI behind the dialog);
+// Enter persists them, Esc restores the original layout.
 type customizeDialog struct {
 	BaseDialog
 
@@ -66,6 +81,7 @@ type customizeDialog struct {
 // currently active settings.
 func NewCustomizeDialog(current messages.LayoutSettings) Dialog {
 	current.SidebarPosition = messages.ParseSidebarPosition(string(current.SidebarPosition))
+	current.SectionSpacing = messages.ParseSectionSpacing(string(current.SectionSpacing))
 	return &customizeDialog{
 		original: current,
 		current:  current,
@@ -124,7 +140,9 @@ func (d *customizeDialog) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 func (d *customizeDialog) changeValue(delta int) tea.Cmd {
 	switch d.selected {
 	case rowPosition:
-		d.current.SidebarPosition = cyclePosition(d.current.SidebarPosition, delta)
+		d.current.SidebarPosition = cycleValue(sidebarPositions, d.current.SidebarPosition, delta)
+	case rowSpacing:
+		d.current.SectionSpacing = cycleValue(sectionSpacings, d.current.SectionSpacing, delta)
 	case rowUsage:
 		d.current.HideUsage = !d.current.HideUsage
 	case rowAgents:
@@ -139,17 +157,17 @@ func (d *customizeDialog) changeValue(delta int) tea.Cmd {
 	return core.CmdHandler(messages.PreviewLayoutMsg{Layout: d.current})
 }
 
-// cyclePosition returns the position delta steps away in the cycle order.
-func cyclePosition(current messages.SidebarPosition, delta int) messages.SidebarPosition {
+// cycleValue returns the value delta steps away from current in the cycle order.
+func cycleValue[T comparable](values []T, current T, delta int) T {
 	idx := 0
-	for i, p := range sidebarPositions {
-		if p == current {
+	for i, v := range values {
+		if v == current {
 			idx = i
 			break
 		}
 	}
-	idx = (idx + delta + len(sidebarPositions)) % len(sidebarPositions)
-	return sidebarPositions[idx]
+	idx = (idx + delta + len(values)) % len(values)
+	return values[idx]
 }
 
 // apply closes the dialog and commits the current settings.
@@ -193,7 +211,8 @@ func (d *customizeDialog) View() string {
 		AddSpace().
 		AddContent(preview).
 		AddSpace().
-		AddContent(d.renderPositionRow(inner)).
+		AddContent(d.renderSelectorRow(rowPosition, "Sidebar position", positionLabels[d.current.SidebarPosition], inner)).
+		AddContent(d.renderSelectorRow(rowSpacing, "Section spacing", spacingLabels[d.current.SectionSpacing], inner)).
 		AddSpace().
 		AddContent(styles.MutedStyle.Render("Sidebar sections")).
 		AddContent(d.renderToggleRow(rowUsage, "Token usage", d.current.HideUsage)).
@@ -207,15 +226,14 @@ func (d *customizeDialog) View() string {
 	return styles.DialogStyle.Width(width).Render(content)
 }
 
-// renderPositionRow renders the sidebar-position selector row.
-func (d *customizeDialog) renderPositionRow(width int) string {
-	label := "Sidebar position"
-	value := "‹ " + positionLabels[d.current.SidebarPosition] + " ›"
+// renderSelectorRow renders a row with a ‹ value › selector aligned to the right.
+func (d *customizeDialog) renderSelectorRow(row int, label, valueLabel string, width int) string {
+	value := "‹ " + valueLabel + " ›"
 
 	labelStyle := styles.PaletteUnselectedActionStyle
 	valueStyle := styles.SecondaryStyle
 	prefix := "  "
-	if d.selected == rowPosition {
+	if d.selected == row {
 		labelStyle = styles.PaletteSelectedActionStyle
 		valueStyle = styles.HighlightWhiteStyle
 		prefix = styles.HighlightWhiteStyle.Render("› ")

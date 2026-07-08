@@ -27,11 +27,51 @@ func ParseSidebarPosition(raw string) SidebarPosition {
 	}
 }
 
+// SectionSpacing identifies how much blank space separates the sidebar
+// sections (blocks) in the vertical sidebar.
+type SectionSpacing string
+
+const (
+	// SpacingNormal is the default spacing between sidebar sections.
+	SpacingNormal SectionSpacing = "normal"
+	// SpacingCompact tightens the sidebar by using less space between sections.
+	SpacingCompact SectionSpacing = "compact"
+	// SpacingRelaxed adds extra breathing room between sections.
+	SpacingRelaxed SectionSpacing = "relaxed"
+)
+
+// ParseSectionSpacing normalizes a raw spacing string, falling back to
+// SpacingNormal for empty or unknown values so persisted configs can never
+// break the layout.
+func ParseSectionSpacing(raw string) SectionSpacing {
+	switch SectionSpacing(raw) {
+	case SpacingCompact, SpacingRelaxed:
+		return SectionSpacing(raw)
+	default:
+		return SpacingNormal
+	}
+}
+
+// BlankLines returns the number of blank lines rendered between sidebar
+// sections for this spacing.
+func (s SectionSpacing) BlankLines() int {
+	switch ParseSectionSpacing(string(s)) {
+	case SpacingCompact:
+		return 1
+	case SpacingRelaxed:
+		return 3
+	default:
+		return 2
+	}
+}
+
 // LayoutSettings describes the user-customizable TUI layout: where the
-// sidebar sits and which of its optional sections are rendered. The zero
-// value is the default layout (sidebar on the right, everything visible).
+// sidebar sits, which of its optional sections are rendered, and how much
+// space separates them. The zero value is the default layout (sidebar on
+// the right, everything visible, normal spacing).
 type LayoutSettings struct {
 	SidebarPosition SidebarPosition
+	SectionSpacing  SectionSpacing
 	HideUsage       bool
 	HideAgents      bool
 	HideTools       bool

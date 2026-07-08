@@ -70,6 +70,8 @@ type Model interface {
 	SetQueuedMessages(messages ...string)
 	// SetSectionVisibility controls which optional sidebar sections are rendered.
 	SetSectionVisibility(v SectionVisibility)
+	// SetSectionGap sets the number of blank lines between sidebar sections.
+	SetSectionGap(lines int)
 	GetSize() (width, height int)
 	LoadFromSession(sess *session.Session)
 	// ResetStreamTracking clears the active-stream stack so a new top-level run
@@ -164,6 +166,7 @@ type model struct {
 	titleInput         textinput.Model
 	lastTitleClickTime time.Time         // for double-click detection on title
 	sectionVisibility  SectionVisibility // which optional sections are rendered
+	sectionGap         int               // blank lines between sections in vertical mode
 
 	ctx func() context.Context
 
@@ -210,6 +213,7 @@ func New(ctx context.Context, sessionState *service.SessionState) Model {
 		workingDirectory: wd,
 		gitBranchName:    branch,
 		preferredWidth:   DefaultWidth,
+		sectionGap:       defaultSectionGap,
 		titleInput:       ti,
 		cacheDirty:       true, // Initial render needed
 		layoutDirty:      true, // First render must probe scrollbar visibility
@@ -365,6 +369,18 @@ func (m *model) SetSectionVisibility(v SectionVisibility) {
 		return
 	}
 	m.sectionVisibility = v
+	m.invalidateCache()
+}
+
+// SetSectionGap sets the number of blank lines between sidebar sections.
+func (m *model) SetSectionGap(lines int) {
+	if lines < 0 {
+		lines = 0
+	}
+	if m.sectionGap == lines {
+		return
+	}
+	m.sectionGap = lines
 	m.invalidateCache()
 }
 
@@ -1093,13 +1109,23 @@ func (m *model) renderFromCache() string {
 }
 
 // renderSections renders all sidebar sections and returns them as lines.
+// Sections are separated by sectionGap blank lines; each appendSection call
+// returns the index of the section's first line so click zones can be anchored.
 func (m *model) renderSections(contentWidth int) []string {
 	var lines []string
 
-	appendSection := func(section string) {
-		if section != "" {
-			lines = append(lines, strings.Split(section, "\n")...)
+	appendSection := func(section string) int {
+		if section == "" {
+			return len(lines)
 		}
+		if len(lines) > 0 {
+			for range m.sectionGap {
+				lines = append(lines, "")
+			}
+		}
+		start := len(lines)
+		lines = append(lines, strings.Split(section, "\n")...)
+		return start
 	}
 
 	appendSection(m.sessionInfo(contentWidth))
@@ -1113,7 +1139,7 @@ func (m *model) renderSections(contentWidth int) []string {
 	if m.sectionVisibility.HideAgents {
 		m.agentLineOwners = nil
 	} else {
-		appendSection(m.agentInfo(contentWidth))
+		agentSectionStart = appendSection(m.agentInfo(contentWidth))
 	}
 	m.buildAgentClickZones(agentSectionStart)
 
@@ -1123,7 +1149,7 @@ func (m *model) renderSections(contentWidth int) []string {
 
 	if !m.sectionVisibility.HideTodos {
 		m.todoComp.SetSize(contentWidth)
-		appendSection(strings.TrimSuffix(m.todoComp.Render(), "\n"))
+		appendSection(m.todoComp.Render())
 	}
 
 	return lines

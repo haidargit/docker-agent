@@ -139,6 +139,64 @@ func TestCollapsedLineCount_GrowsWithInfoLine(t *testing.T) {
 	assert.Equal(t, withoutInfo+1, withInfo, "the info line adds one band line")
 }
 
+// sectionTitleGap returns the number of consecutive blank lines immediately
+// above the rendered line containing title, or -1 when the title is absent.
+func sectionTitleGap(lines []string, title string) int {
+	for i, line := range lines {
+		if !strings.Contains(ansi.Strip(line), title) {
+			continue
+		}
+		gap := 0
+		for j := i - 1; j >= 0 && strings.TrimSpace(ansi.Strip(lines[j])) == ""; j-- {
+			gap++
+		}
+		return gap
+	}
+	return -1
+}
+
+func TestRenderSections_SectionGap(t *testing.T) {
+	t.Parallel()
+
+	s := newVisibilityTestSidebar(t)
+
+	for _, gap := range []int{1, 2, 3} {
+		s.SetSectionGap(gap)
+		lines := s.renderSections(40)
+		assert.Equal(t, gap, sectionTitleGap(lines, "Token Usage"), "gap %d before Token Usage", gap)
+		assert.Equal(t, gap, sectionTitleGap(lines, "Tools"), "gap %d before Tools", gap)
+	}
+}
+
+func TestRenderSections_SectionGapKeepsAgentClickZones(t *testing.T) {
+	t.Parallel()
+
+	s := newVisibilityTestSidebar(t)
+	s.SetSectionGap(3)
+	lines := s.renderSections(40)
+
+	require.NotEmpty(t, s.agentClickZones)
+	for lineIdx, agentName := range s.agentClickZones {
+		require.Less(t, lineIdx, len(lines))
+		assert.Contains(t, ansi.Strip(lines[lineIdx-1])+ansi.Strip(lines[lineIdx]), agentName,
+			"click zone %d must map onto a line of agent %q", lineIdx, agentName)
+	}
+}
+
+func TestSetSectionGap_NoopWhenUnchanged(t *testing.T) {
+	t.Parallel()
+
+	s := newTestSidebar(t)
+	s.renderSections(40)
+	s.cacheDirty = false
+
+	s.SetSectionGap(defaultSectionGap)
+	assert.False(t, s.cacheDirty, "identical gap must not invalidate the cache")
+
+	s.SetSectionGap(1)
+	assert.True(t, s.cacheDirty)
+}
+
 func TestSetSectionVisibility_NoopWhenUnchanged(t *testing.T) {
 	t.Parallel()
 

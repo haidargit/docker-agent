@@ -185,6 +185,7 @@ func TestSettings_LayoutRoundTrip(t *testing.T) {
 		Settings: &Settings{
 			Layout: &LayoutSettings{
 				SidebarPosition: "left",
+				SectionSpacing:  "compact",
 				HideUsage:       true,
 				HideTodos:       true,
 			},
@@ -198,6 +199,7 @@ func TestSettings_LayoutRoundTrip(t *testing.T) {
 
 	layout := loaded.GetSettings().GetLayout()
 	assert.Equal(t, "left", layout.SidebarPosition)
+	assert.Equal(t, "compact", layout.SectionSpacing)
 	assert.True(t, layout.HideUsage)
 	assert.False(t, layout.HideAgents)
 	assert.False(t, layout.HideTools)

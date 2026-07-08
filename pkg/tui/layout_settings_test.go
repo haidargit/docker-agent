@@ -23,17 +23,18 @@ func TestLayoutSettingsFromConfig(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t,
-		messages.LayoutSettings{SidebarPosition: messages.SidebarRight},
+		messages.LayoutSettings{SidebarPosition: messages.SidebarRight, SectionSpacing: messages.SpacingNormal},
 		layoutSettingsFromConfig(userconfig.LayoutSettings{}),
-		"empty config falls back to the default position")
+		"empty config falls back to the default position and spacing")
 
 	assert.Equal(t,
-		messages.LayoutSettings{SidebarPosition: messages.SidebarRight},
-		layoutSettingsFromConfig(userconfig.LayoutSettings{SidebarPosition: "bogus"}),
-		"unknown positions fall back to the default")
+		messages.LayoutSettings{SidebarPosition: messages.SidebarRight, SectionSpacing: messages.SpacingNormal},
+		layoutSettingsFromConfig(userconfig.LayoutSettings{SidebarPosition: "bogus", SectionSpacing: "bogus"}),
+		"unknown values fall back to the defaults")
 
 	got := layoutSettingsFromConfig(userconfig.LayoutSettings{
 		SidebarPosition: "bottom",
+		SectionSpacing:  "compact",
 		HideUsage:       true,
 		HideAgents:      true,
 		HideTools:       true,
@@ -41,6 +42,7 @@ func TestLayoutSettingsFromConfig(t *testing.T) {
 	})
 	assert.Equal(t, messages.LayoutSettings{
 		SidebarPosition: messages.SidebarBottom,
+		SectionSpacing:  messages.SpacingCompact,
 		HideUsage:       true,
 		HideAgents:      true,
 		HideTools:       true,
@@ -53,6 +55,7 @@ func TestSaveLayoutToUserConfig_RoundTrip(t *testing.T) {
 
 	saved := messages.LayoutSettings{
 		SidebarPosition: messages.SidebarLeft,
+		SectionSpacing:  messages.SpacingRelaxed,
 		HideTools:       true,
 	}
 	require.NoError(t, saveLayoutToUserConfig(saved))
@@ -68,6 +71,7 @@ func TestSaveLayoutToUserConfig_DefaultsClearEntry(t *testing.T) {
 	}))
 	require.NoError(t, saveLayoutToUserConfig(messages.LayoutSettings{
 		SidebarPosition: messages.SidebarRight,
+		SectionSpacing:  messages.SpacingNormal,
 	}))
 
 	cfg, err := userconfig.Load()
@@ -80,6 +84,7 @@ func TestSaveLayoutToUserConfig_OmitsDefaultPosition(t *testing.T) {
 
 	require.NoError(t, saveLayoutToUserConfig(messages.LayoutSettings{
 		SidebarPosition: messages.SidebarRight,
+		SectionSpacing:  messages.SpacingNormal,
 		HideUsage:       true,
 	}))
 
@@ -88,5 +93,6 @@ func TestSaveLayoutToUserConfig_OmitsDefaultPosition(t *testing.T) {
 	layout := cfg.GetSettings().Layout
 	require.NotNil(t, layout)
 	assert.Empty(t, layout.SidebarPosition, "the default position is not written out")
+	assert.Empty(t, layout.SectionSpacing, "the default spacing is not written out")
 	assert.True(t, layout.HideUsage)
 }

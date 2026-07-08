@@ -100,11 +100,15 @@ type Settings struct {
 }
 
 // LayoutSettings customizes the TUI chat layout. The zero value is the
-// default layout: sidebar on the right with every section visible.
+// default layout: sidebar on the right with every section visible and
+// normal spacing between sections.
 type LayoutSettings struct {
 	// SidebarPosition places the session info sidebar: "right" (default),
 	// "left", "top", or "bottom".
 	SidebarPosition string `yaml:"sidebar_position,omitempty"`
+	// SectionSpacing controls the blank space between sidebar sections:
+	// "normal" (default), "compact", or "relaxed".
+	SectionSpacing string `yaml:"section_spacing,omitempty"`
 	// HideUsage hides the token usage section in the sidebar.
 	HideUsage bool `yaml:"hide_usage,omitempty"`
 	// HideAgents hides the agents section in the sidebar.

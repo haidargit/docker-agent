@@ -77,7 +77,7 @@ Type `/` during a session to see available commands, or press <kbd>Ctrl</kbd>+<k
 | `/sessions`        | Browse and load past sessions                                                        |
 | `/model`           | Change the model for the current agent                                               |
 | `/effort`          | Set the current model's reasoning-effort level (`/effort <none\|minimal\|low\|medium\|high\|xhigh\|max>`, or `/effort` alone to pick from the supported levels; reasoning models only) |
-| `/custom`          | Customize the TUI layout: sidebar position and visible sidebar sections              |
+| `/custom`          | Customize the TUI layout: sidebar position, section spacing, and visible sidebar sections |
 | `/theme`           | Change the color theme                                                               |
 | `/yolo`            | Toggle automatic tool call approval                                                  |
 | `/title`           | Set or regenerate session title                                                      |
@@ -325,6 +325,7 @@ Press <kbd>Ctrl</kbd>+<kbd>R</kbd> to enter incremental history search mode. Sta
 Run `/custom` to open the layout dialog. It shows a live schematic preview of the resulting layout and applies every change immediately to the UI behind the dialog:
 
 - **Sidebar position**: `Right` (default), `Left`, `Top`, or `Bottom`. Left/right keep the full vertical sidebar next to the chat; top/bottom render it as a compact horizontal band above or below the chat (session title, working directory, usage, plus a one-line summary of the current agent, tools, and todos).
+- **Section spacing**: `Compact`, `Normal` (default), or `Relaxed`, the number of blank lines between the sidebar sections (1, 2, or 3).
 - **Sidebar sections**: toggle the visibility of the **Token usage**, **Agents**, **Tools**, and **Todos** sections. The session block (title and working directory) is always shown.
 
 Press <kbd>Enter</kbd> to apply and persist, or <kbd>Escape</kbd> to cancel and restore the previous layout. The settings are saved globally in `~/.config/cagent/config.yaml`:
@@ -334,6 +335,7 @@ Press <kbd>Enter</kbd> to apply and persist, or <kbd>Escape</kbd> to cancel and 
 settings:
   layout:
     sidebar_position: left # right (default), left, top, bottom
+    section_spacing: compact # normal (default), compact, relaxed
     hide_usage: true
     hide_agents: false
     hide_tools: false

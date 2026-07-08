@@ -147,8 +147,8 @@ type Page interface {
 	GetSidebarSettings() SidebarSettings
 	// SetSidebarSettings applies sidebar display settings
 	SetSidebarSettings(settings SidebarSettings)
-	// SetLayoutSettings applies layout customization (sidebar position and
-	// section visibility) and relayouts the page.
+	// SetLayoutSettings applies layout customization (sidebar position,
+	// section spacing, and section visibility) and relayouts the page.
 	SetLayoutSettings(settings msgtypes.LayoutSettings) tea.Cmd
 }
 
@@ -358,12 +358,13 @@ func WithCommandParser(p *commands.Parser) PageOption {
 	}
 }
 
-// WithLayoutSettings applies initial layout customization (sidebar position
-// and section visibility).
+// WithLayoutSettings applies initial layout customization (sidebar position,
+// section spacing, and section visibility).
 func WithLayoutSettings(settings msgtypes.LayoutSettings) PageOption {
 	return func(p *chatPage) {
 		p.layoutSettings = settings
 		p.sidebar.SetSectionVisibility(sectionVisibility(settings))
+		p.sidebar.SetSectionGap(settings.SectionSpacing.BlankLines())
 	}
 }
 
@@ -1103,6 +1104,7 @@ func (p *chatPage) SetSidebarSettings(settings SidebarSettings) {
 func (p *chatPage) SetLayoutSettings(settings msgtypes.LayoutSettings) tea.Cmd {
 	p.layoutSettings = settings
 	p.sidebar.SetSectionVisibility(sectionVisibility(settings))
+	p.sidebar.SetSectionGap(settings.SectionSpacing.BlankLines())
 	if p.width <= 0 || p.height <= 0 {
 		return nil
 	}

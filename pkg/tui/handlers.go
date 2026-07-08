@@ -805,6 +805,7 @@ func (m *appModel) handleOpenCustomizeDialog() (tea.Model, tea.Cmd) {
 // share the same layout) and optionally persists it to the user config.
 func (m *appModel) applyLayoutSettings(settings messages.LayoutSettings, persist bool) (tea.Model, tea.Cmd) {
 	settings.SidebarPosition = messages.ParseSidebarPosition(string(settings.SidebarPosition))
+	settings.SectionSpacing = messages.ParseSectionSpacing(string(settings.SectionSpacing))
 	m.layoutSettings = settings
 
 	var cmds []tea.Cmd
@@ -831,6 +832,7 @@ func (m *appModel) applyLayoutSettings(settings messages.LayoutSettings, persist
 func layoutSettingsFromConfig(l userconfig.LayoutSettings) messages.LayoutSettings {
 	return messages.LayoutSettings{
 		SidebarPosition: messages.ParseSidebarPosition(l.SidebarPosition),
+		SectionSpacing:  messages.ParseSectionSpacing(l.SectionSpacing),
 		HideUsage:       l.HideUsage,
 		HideAgents:      l.HideAgents,
 		HideTools:       l.HideTools,
@@ -846,7 +848,7 @@ func saveLayoutToUserConfig(s messages.LayoutSettings) error {
 			cfg.Settings = &userconfig.Settings{}
 		}
 
-		if s == (messages.LayoutSettings{SidebarPosition: messages.SidebarRight}) {
+		if s == (messages.LayoutSettings{SidebarPosition: messages.SidebarRight, SectionSpacing: messages.SpacingNormal}) {
 			cfg.Settings.Layout = nil
 			return nil
 		}
@@ -855,8 +857,13 @@ func saveLayoutToUserConfig(s messages.LayoutSettings) error {
 		if s.SidebarPosition == messages.SidebarRight {
 			position = ""
 		}
+		spacing := string(s.SectionSpacing)
+		if s.SectionSpacing == messages.SpacingNormal {
+			spacing = ""
+		}
 		cfg.Settings.Layout = &userconfig.LayoutSettings{
 			SidebarPosition: position,
+			SectionSpacing:  spacing,
 			HideUsage:       s.HideUsage,
 			HideAgents:      s.HideAgents,
 			HideTools:       s.HideTools,

@@ -37,6 +37,9 @@ func TestCustomizeDialogNavigation(t *testing.T) {
 	require.Equal(t, rowPosition, d.selected)
 
 	d.Update(down)
+	require.Equal(t, rowSpacing, d.selected)
+
+	d.Update(down)
 	require.Equal(t, rowUsage, d.selected)
 
 	for range 10 {
@@ -68,6 +71,30 @@ func TestCustomizeDialogCyclesPositionAndPreviews(t *testing.T) {
 	d.current.SidebarPosition = messages.SidebarRight
 	d.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
 	assert.Equal(t, messages.SidebarBottom, d.current.SidebarPosition)
+}
+
+func TestCustomizeDialogCyclesSpacingAndPreviews(t *testing.T) {
+	t.Parallel()
+
+	d := newTestCustomizeDialog(t, messages.LayoutSettings{})
+	require.Equal(t, messages.SpacingNormal, d.current.SectionSpacing,
+		"empty spacing normalizes to normal")
+	d.selected = rowSpacing
+
+	_, cmd := d.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	require.NotNil(t, cmd)
+	msgs := collectMsgs(cmd)
+	require.Len(t, msgs, 1)
+	preview, ok := msgs[0].(messages.PreviewLayoutMsg)
+	require.True(t, ok, "changing the spacing must emit a live preview")
+	assert.Equal(t, messages.SpacingRelaxed, preview.Layout.SectionSpacing)
+
+	d.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	assert.Equal(t, messages.SpacingCompact, d.current.SectionSpacing, "cycling wraps around")
+
+	d.current.SectionSpacing = messages.SpacingNormal
+	d.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	assert.Equal(t, messages.SpacingCompact, d.current.SectionSpacing)
 }
 
 func TestCustomizeDialogTogglesSection(t *testing.T) {
@@ -119,7 +146,7 @@ func TestCustomizeDialogApplyWithoutChangesOnlyCloses(t *testing.T) {
 func TestCustomizeDialogEscapeRestoresOriginal(t *testing.T) {
 	t.Parallel()
 
-	original := messages.LayoutSettings{SidebarPosition: messages.SidebarLeft}
+	original := messages.LayoutSettings{SidebarPosition: messages.SidebarLeft, SectionSpacing: messages.SpacingNormal}
 	d := newTestCustomizeDialog(t, original)
 	d.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 
@@ -154,6 +181,8 @@ func TestCustomizeDialogViewShowsRows(t *testing.T) {
 	assert.Contains(t, view, "Customize Layout")
 	assert.Contains(t, view, "Sidebar position")
 	assert.Contains(t, view, "Right")
+	assert.Contains(t, view, "Section spacing")
+	assert.Contains(t, view, "Normal")
 	assert.Contains(t, view, "Token usage")
 	assert.Contains(t, view, "Agents")
 	assert.Contains(t, view, "Tools")
