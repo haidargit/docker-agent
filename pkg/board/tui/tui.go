@@ -688,6 +688,10 @@ func (m *model) handleClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if msg.Button != tea.MouseLeft {
 		return m, nil
 	}
+	// A fresh press while a drag is still armed means the release was lost
+	// (e.g. tea.ExecProcess leaving mouse mode): clear the stale drag before
+	// interpreting the click.
+	m.resetDrag()
 	if m.plusButtonAt(msg.X, msg.Y) {
 		cmd := m.openNewCard()
 		return m, cmd
@@ -718,7 +722,6 @@ func (m *model) handleClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	col, row, ok := m.cardAt(msg.X, msg.Y)
 	if !ok {
 		m.lastClickCard = ""
-		m.resetDrag() // a lost release must not leak into this gesture
 		return m, nil
 	}
 	m.selCol, m.selRow = col, row
@@ -736,9 +739,7 @@ func (m *model) handleClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	m.lastClickCard = card.ID
 	m.lastClickTime = time.Now()
 	// The pressed card is a drag candidate: motion before the release turns
-	// the click into a drag (see handleMotion/handleRelease). Rearming also
-	// clears any drag whose release was lost (e.g. to tea.ExecProcess).
-	m.resetDrag()
+	// the click into a drag (see handleMotion/handleRelease).
 	m.dragCardID = card.ID
 	m.dragCol = col
 	return m, nil
