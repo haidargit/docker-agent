@@ -2,22 +2,28 @@ package teamloader
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"testing"
 
 	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/docker/docker-agent/pkg/chat"
 	"github.com/docker/docker-agent/pkg/config"
 	"github.com/docker/docker-agent/pkg/config/latest"
 	"github.com/docker/docker-agent/pkg/environment"
 	"github.com/docker/docker-agent/pkg/js"
 	"github.com/docker/docker-agent/pkg/model/provider/dmr"
+	"github.com/docker/docker-agent/pkg/model/provider/options"
 	providerdefaults "github.com/docker/docker-agent/pkg/model/provider/providers"
 	"github.com/docker/docker-agent/pkg/tools"
 )
@@ -981,4 +987,122 @@ func TestLoadWithConfig_MergesAgentGlobalAndCLIHooks(t *testing.T) {
 	assert.Equal(t, "global-pre", hooks.PreToolUse[1].Hooks[0].Command)
 	assert.Empty(t, hooks.PreToolUse[2].Matcher)
 	assert.Equal(t, "cli-pre", hooks.PreToolUse[2].Hooks[0].Command)
+}
+
+// countingTransport wraps a base RoundTripper and counts how many times
+// RoundTrip is called. Mirrors the helper in
+// pkg/model/provider/anthropic/wrap_transport_test.go (unexported there, so
+// duplicated here for this package's own end-to-end assertion).
+type countingTransport struct {
+	base  http.RoundTripper
+	calls atomic.Int64
+}
+
+func (c *countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.calls.Add(1)
+	return c.base.RoundTrip(req)
+}
+
+// writeMinimalAnthropicSSE writes a bare-minimum valid Anthropic SSE stream so
+// the streaming client does not error before the transport wrapper can be
+// observed.
+func writeMinimalAnthropicSSE(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	flusher, _ := w.(http.Flusher)
+
+	writeEvent := func(eventType string, payload map[string]any) {
+		data, _ := json.Marshal(payload)
+		_, _ = w.Write([]byte("event: " + eventType + "\n"))
+		_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	writeEvent("message_start", map[string]any{
+		"type":    "message_start",
+		"message": map[string]any{"id": "msg_test", "model": "claude-test", "role": "assistant", "type": "message", "content": []any{}, "stop_reason": nil, "usage": map[string]any{"input_tokens": 5, "output_tokens": 0}},
+	})
+	writeEvent("content_block_start", map[string]any{
+		"type":  "content_block_start",
+		"index": 0,
+		"content_block": map[string]any{
+			"type": "text",
+			"text": "",
+		},
+	})
+	writeEvent("content_block_delta", map[string]any{
+		"type":  "content_block_delta",
+		"index": 0,
+		"delta": map[string]any{"type": "text_delta", "text": "hi"},
+	})
+	writeEvent("content_block_stop", map[string]any{
+		"type":  "content_block_stop",
+		"index": 0,
+	})
+	writeEvent("message_delta", map[string]any{
+		"type":  "message_delta",
+		"delta": map[string]any{"stop_reason": "end_turn", "stop_sequence": nil},
+		"usage": map[string]any{"output_tokens": 1},
+	})
+	writeEvent("message_stop", map[string]any{"type": "message_stop"})
+}
+
+// TestWithModelOptions_TransportWrapperReachesAgentModel is the regression
+// guard for the teamloader-level model-options passthrough: it proves that an
+// options.Opt supplied via WithModelOptions (e.g.
+// options.WithHTTPTransportWrapper, used to inject gateway auth
+// provider-agnostically) actually reaches the HTTP client of a model
+// constructed through Load — not just teamloader's own built-in opts
+// (WithGateway, WithStructuredOutput, WithProviders). Before this passthrough
+// existed, there was no way for an embedder to wrap the transport of
+// teamloader-constructed models at all; this test exercises the full Load ->
+// agent -> provider -> HTTP round trip to prove the wrapper is live, not just
+// that WithModelOptions compiles.
+func TestWithModelOptions_TransportWrapperReachesAgentModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeMinimalAnthropicSSE(w)
+	}))
+	defer server.Close()
+
+	t.Setenv("ANTHROPIC_API_KEY", "dummy")
+
+	data := []byte(`models:
+  primary:
+    provider: anthropic
+    model: claude-sonnet-4-5
+    base_url: ` + server.URL + `
+agents:
+  root:
+    model: primary
+    instruction: test
+`)
+
+	var counter countingTransport
+	opts := append(withTestProviderRegistry(), WithModelOptions(
+		options.WithHTTPTransportWrapper(func(base http.RoundTripper) http.RoundTripper {
+			counter.base = base
+			return &counter
+		}),
+	))
+
+	team, err := Load(t.Context(), config.NewBytesSource("transport-wrapper.yaml", data), &config.RuntimeConfig{}, opts...)
+	require.NoError(t, err)
+
+	root, err := team.Agent("root")
+	require.NoError(t, err)
+
+	stream, err := root.Model(t.Context()).CreateChatCompletionStream(t.Context(), []chat.Message{
+		{Role: chat.MessageRoleUser, Content: "hello"},
+	}, nil)
+	require.NoError(t, err)
+	defer stream.Close()
+
+	for {
+		if _, err := stream.Recv(); err != nil {
+			break
+		}
+	}
+
+	assert.Positive(t, counter.calls.Load(), "transport wrapper supplied via WithModelOptions should have been invoked when the agent's model made a request")
 }
