@@ -144,6 +144,9 @@ func (h *shellHandler) RunShell(ctx context.Context, params RunShellArgs, rt too
 	defer cancel()
 
 	cwd := h.resolveWorkDir(params.Cwd)
+	if msg := checkWorkDir(cwd); msg != "" {
+		return tools.ResultError(msg), nil
+	}
 
 	// Stamp the call shape (cmd, cwd, timeout) onto the active span.
 	// Cmd ships unconditionally — it's the main signal of what the
@@ -299,6 +302,27 @@ func New(env []string, runConfig *config.RuntimeConfig) *ToolSet {
 // PATH hijacking (CWE-426).
 func detectShell() (shell string, argsPrefix []string) {
 	return shellpath.DetectShell()
+}
+
+// checkWorkDir verifies the working directory exists and is a directory,
+// returning a user-facing error message (empty when OK). Without this check,
+// a missing cwd surfaces as the cryptic "fork/exec <shell>: no such file or
+// directory": the child's chdir failure is misattributed to the shell binary
+// when SysProcAttr forces the raw fork+exec path.
+func checkWorkDir(cwd string) string {
+	if cwd == "" {
+		return "" // empty Dir means "inherit the process cwd", always valid
+	}
+	info, err := os.Stat(cwd)
+	switch {
+	case os.IsNotExist(err):
+		return "Error: working directory does not exist: " + cwd
+	case err != nil:
+		return fmt.Sprintf("Error: cannot access working directory %s: %s", cwd, err)
+	case !info.IsDir():
+		return "Error: working directory is not a directory: " + cwd
+	}
+	return ""
 }
 
 // resolveWorkDir returns the effective working directory.

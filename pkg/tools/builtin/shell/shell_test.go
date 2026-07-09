@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
@@ -228,6 +229,24 @@ func TestResolveWorkDir(t *testing.T) {
 			assert.Equal(t, tt.expected, h.resolveWorkDir(tt.cwd))
 		})
 	}
+}
+
+// Regression test: a session working directory that no longer exists (e.g. a
+// removed git worktree restored for a new tab) must yield a clear error, not
+// the misleading "fork/exec <shell>: no such file or directory" produced by
+// the child's chdir failure.
+func TestShellTool_MissingWorkingDir(t *testing.T) {
+	t.Parallel()
+
+	missing := filepath.Join(t.TempDir(), "gone")
+	tool := New(nil, &config.RuntimeConfig{Config: config.Config{WorkingDir: missing}})
+
+	result, err := tool.handler.RunShell(t.Context(), RunShellArgs{Cmd: "pwd"}, tools.NopRuntime{})
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Output, "working directory does not exist")
+	assert.Contains(t, result.Output, missing)
+	assert.NotContains(t, result.Output, "fork/exec")
 }
 
 func TestShellTool_RelativeCwdResolvesAgainstWorkingDir(t *testing.T) {
