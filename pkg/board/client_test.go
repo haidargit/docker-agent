@@ -62,15 +62,15 @@ func TestStreamEventsIdleWatchdogAbortsSilentStream(t *testing.T) {
 
 func TestStreamEventsHeartbeatLinesResetWatchdog(t *testing.T) {
 	old := streamIdleTimeout
-	streamIdleTimeout = 50 * time.Millisecond
+	streamIdleTimeout = 250 * time.Millisecond
 	t.Cleanup(func() { streamIdleTimeout = old })
 
 	socket := serveUnix(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f := w.(http.Flusher)
-		for range 4 {
+		for range 6 {
 			fmt.Fprint(w, ": ping\n")
 			f.Flush()
-			time.Sleep(20 * time.Millisecond) //nolint:forbidigo // heartbeat cadence is under test
+			time.Sleep(50 * time.Millisecond) //nolint:forbidigo // heartbeat cadence is under test
 		}
 		fmt.Fprint(w, "data: {\"type\":\"stream_stopped\"}\n\n")
 		f.Flush()
