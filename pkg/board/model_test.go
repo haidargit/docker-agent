@@ -54,9 +54,10 @@ func TestColumnsFromConfig(t *testing.T) {
 
 	// Hand-edited configs are normalized: a missing id is derived from the
 	// name, duplicate ids and unusable entries are dropped, a missing name
-	// falls back to the id, and emoji padding is trimmed.
+	// falls back to the id, and whitespace (including newlines, which would
+	// break the single-line headers) collapses to single spaces.
 	cols = ColumnsFromConfig([]userconfig.BoardColumn{
-		{Name: "In Review", Emoji: " 🔍 "},
+		{Name: "In\nReview", Emoji: " 🔍 "},
 		{ID: "in-review", Name: "Dup"},
 		{Emoji: "🚧"},
 		{ID: " done "},

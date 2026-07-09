@@ -198,6 +198,12 @@ type promptDialog struct {
 }
 
 func newPromptDialog(column board.Column) *promptDialog {
+	// The column's name and emoji come from the hand-editable config file:
+	// strip terminal controls (and collapse whitespace) before rendering,
+	// like every other column render site.
+	column.Name = strings.Join(strings.Fields(sanitize(column.Name)), " ")
+	column.Emoji = strings.Join(strings.Fields(sanitize(column.Emoji)), " ")
+
 	ta := textarea.New()
 	ta.SetStyles(styles.InputStyle)
 	ta.Placeholder = "Prompt sent to a card's agent when it enters " + column.Name + "…"

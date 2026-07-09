@@ -195,14 +195,16 @@ func (a *App) RemoveColumn(id string) error {
 	return a.saveConfigLocked()
 }
 
-// normalizeColumn checks a column's name and trims its fields. The prompt
-// keeps inner newlines: multi-line prompts are the norm.
+// normalizeColumn checks a column's name and normalizes its fields: name
+// and emoji are single-line display strings (inner whitespace collapses to
+// spaces), the prompt keeps inner newlines — multi-line prompts are the
+// norm.
 func normalizeColumn(col Column) (Column, error) {
-	col.Name = strings.TrimSpace(col.Name)
+	col.Name = collapseSpace(col.Name)
 	if col.Name == "" {
 		return Column{}, errors.New("column name is required")
 	}
-	col.Emoji = strings.TrimSpace(col.Emoji)
+	col.Emoji = collapseSpace(col.Emoji)
 	col.Prompt = strings.TrimSpace(col.Prompt)
 	return col, nil
 }
@@ -212,7 +214,7 @@ func normalizeColumn(col Column) (Column, error) {
 func (a *App) uniqueColumnIDLocked(name string) string {
 	base := columnID(name)
 	if base == "" {
-		base = "col-" + newID()[:4]
+		base = fallbackColumnID(name)
 	}
 	id := base
 	for n := 2; slices.ContainsFunc(a.columns, func(c Column) bool { return c.ID == id }); n++ {

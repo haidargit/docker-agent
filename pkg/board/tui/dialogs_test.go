@@ -165,3 +165,15 @@ func TestColumnsDialogPromptOpensEditor(t *testing.T) {
 	require.NotNil(t, cmd)
 	assert.Equal(t, editColumnPromptMsg{column: col}, cmd())
 }
+
+// The prompt editor's title and placeholder render the column's name and
+// emoji, which come from the hand-editable config file: terminal controls
+// must be stripped like at every other column render site.
+func TestPromptDialogSanitizesColumnName(t *testing.T) {
+	d := newPromptDialog(board.Column{ID: "dev", Name: "Dev\x1b]0;pwned\x07", Emoji: "\x1b[31m🔨"})
+
+	view := d.View(80, 40)
+	assert.NotContains(t, view, "\x1b]0;pwned")
+	assert.NotContains(t, view, "\x1b[31m🔨")
+	assert.Contains(t, view, "Dev")
+}

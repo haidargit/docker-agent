@@ -48,14 +48,12 @@ func ColumnsFromConfig(cols []userconfig.BoardColumn) []Column {
 	seen := make(map[string]bool, len(cols))
 	for _, c := range cols {
 		id := strings.TrimSpace(c.ID)
-		name := strings.TrimSpace(c.Name)
+		name := collapseSpace(c.Name)
 		if id == "" {
 			id = columnID(name)
 		}
 		if id == "" && name != "" {
-			h := fnv.New32a()
-			h.Write([]byte(name))
-			id = fmt.Sprintf("col-%08x", h.Sum32())
+			id = fallbackColumnID(name)
 		}
 		if id == "" || seen[id] {
 			continue
@@ -64,7 +62,7 @@ func ColumnsFromConfig(cols []userconfig.BoardColumn) []Column {
 		if name == "" {
 			name = id
 		}
-		out = append(out, Column{ID: id, Name: name, Emoji: strings.TrimSpace(c.Emoji), Prompt: c.Prompt})
+		out = append(out, Column{ID: id, Name: name, Emoji: collapseSpace(c.Emoji), Prompt: c.Prompt})
 	}
 	if len(out) == 0 {
 		// Cloned: the caller may edit the pipeline in place.
@@ -89,6 +87,23 @@ func columnID(name string) string {
 		}
 	}
 	return strings.TrimSuffix(b.String(), "-")
+}
+
+// fallbackColumnID returns a stable id for a name [columnID] slugs to
+// nothing (e.g. non-ASCII or emoji-only): a hash of the name, so the id
+// stays the same across restarts and cards stay attached to their column.
+func fallbackColumnID(name string) string {
+	h := fnv.New32a()
+	h.Write([]byte(name))
+	return fmt.Sprintf("col-%08x", h.Sum32())
+}
+
+// collapseSpace trims a string and collapses inner whitespace (including
+// newlines) to single spaces. Column names and emoji are rendered on
+// single-line headers whose mouse hitboxes are computed arithmetically, so
+// an embedded newline from a hand-edited config would break the layout.
+func collapseSpace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // CardStatus tracks what a card's agent is doing.

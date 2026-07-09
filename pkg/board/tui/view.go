@@ -530,7 +530,7 @@ func (m *model) renderFooter() string {
 	// descriptions on the left, muted context on the right.
 	hints := []string{
 		"n", "new", "⏎", "attach", "d", "diff", "o", "editor", "s", "shell", "[ ] 1-9", "move",
-		"x", "delete", "p", "projects", "e", "prompt", "?", "help", "q", "quit",
+		"x", "delete", "p", "projects", "c", "columns", "e", "prompt", "?", "help", "q", "quit",
 	}
 	parts := make([]string, 0, len(hints)/2)
 	for i := 0; i < len(hints); i += 2 {
