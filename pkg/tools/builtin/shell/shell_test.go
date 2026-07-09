@@ -231,6 +231,18 @@ func TestResolveWorkDir(t *testing.T) {
 	}
 }
 
+func TestCheckWorkDir(t *testing.T) {
+	t.Parallel()
+
+	file := filepath.Join(t.TempDir(), "f")
+	require.NoError(t, os.WriteFile(file, nil, 0o644))
+
+	assert.Empty(t, checkWorkDir(""), "empty cwd inherits the process cwd")
+	assert.Empty(t, checkWorkDir(t.TempDir()))
+	assert.Contains(t, checkWorkDir(filepath.Join(t.TempDir(), "gone")), "does not exist")
+	assert.Contains(t, checkWorkDir(file), "not a directory")
+}
+
 // Regression test: a session working directory that no longer exists (e.g. a
 // removed git worktree restored for a new tab) must yield a clear error, not
 // the misleading "fork/exec <shell>: no such file or directory" produced by
