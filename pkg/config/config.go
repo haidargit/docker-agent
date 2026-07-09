@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -47,7 +48,11 @@ func Load(ctx context.Context, source Source) (*latest.Config, error) {
 
 	oldConfig, err := parseCurrentVersion(data, raw.Version)
 	if err != nil {
-		return nil, fmt.Errorf("parsing config file\n%s", yaml.FormatError(err, true, true))
+		msg := yaml.FormatError(err, true, true)
+		if hint := newerVersionHint(data, raw.Version, err); hint != "" {
+			msg += "\n" + hint
+		}
+		return nil, fmt.Errorf("parsing config file\n%s", msg)
 	}
 
 	config, err := migrateToLatestConfig(oldConfig, data)
@@ -170,6 +175,42 @@ func parseCurrentVersion(data []byte, version string) (any, error) {
 		return nil, fmt.Errorf("unsupported config version: %v (valid versions: %s)", version, strings.Join(slices.Sorted(maps.Keys(parsers)), ", "))
 	}
 	return parser(data)
+}
+
+// newerVersionHint returns a user-facing hint when a strict-parse failure is
+// caused by a key that a newer schema version accepts. It tries the parsers
+// for every version above the declared one, in order, and points the user at
+// the smallest version that parses the config successfully. Best-effort: a
+// newer version may accept the config for unrelated reasons (laxer schema),
+// so the original unknown-field error is always shown before the hint.
+func newerVersionHint(data []byte, version string, parseErr error) string {
+	var unknownField *yaml.UnknownFieldError
+	if !errors.As(parseErr, &unknownField) {
+		return ""
+	}
+
+	current, err := strconv.Atoi(version)
+	if err != nil {
+		return ""
+	}
+
+	parsers, _ := versions()
+	var newer []int
+	for v := range parsers {
+		if n, err := strconv.Atoi(v); err == nil && n > current {
+			newer = append(newer, n)
+		}
+	}
+	slices.Sort(newer)
+
+	for _, n := range newer {
+		v := strconv.Itoa(n)
+		if _, err := parsers[v](data); err == nil {
+			return fmt.Sprintf("hint: this key is supported by config version %s; update the top-level 'version' field (currently %s)", v, version)
+		}
+	}
+
+	return ""
 }
 
 func migrateToLatestConfig(c any, raw []byte) (latest.Config, error) {

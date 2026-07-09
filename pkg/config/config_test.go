@@ -979,3 +979,57 @@ func TestProviders_Validation(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadUnknownKeyFromNewerVersionHint(t *testing.T) {
+	t.Parallel()
+
+	// instruction_file was introduced in version 11.
+	cfgStr := `version: "10"
+agents:
+  root:
+    model: openai/gpt-4o
+    instruction_file: prompt.md
+`
+	_, err := Load(t.Context(), NewBytesSource("test.yaml", []byte(cfgStr)))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown field "instruction_file"`)
+	assert.Contains(t, err.Error(), "supported by config version 11")
+	assert.Contains(t, err.Error(), "currently 10")
+}
+
+func TestLoadUnknownKeyNoNewerVersionNoHint(t *testing.T) {
+	t.Parallel()
+
+	cfgStr := `version: "` + latest.Version + `"
+agents:
+  root:
+    model: openai/gpt-4o
+    instruction: test
+    not_a_real_key: true
+`
+	_, err := Load(t.Context(), NewBytesSource("test.yaml", []byte(cfgStr)))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown field "not_a_real_key"`)
+	assert.NotContains(t, err.Error(), "hint:")
+}
+
+func TestLoadNewerVersionHintNumericOrdering(t *testing.T) {
+	t.Parallel()
+
+	// force_handoff was introduced in version 10. Declaring version "2" pins
+	// two behaviors: versions compare numerically ("10" > "2" despite
+	// lexicographic order) and the smallest accepting version wins (10, not
+	// 11 or 12).
+	cfgStr := `version: "2"
+agents:
+  root:
+    model: openai/gpt-4o
+    instruction: test
+    force_handoff: root
+`
+	_, err := Load(t.Context(), NewBytesSource("test.yaml", []byte(cfgStr)))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown field "force_handoff"`)
+	assert.Contains(t, err.Error(), "supported by config version 10")
+	assert.Contains(t, err.Error(), "currently 2")
+}
