@@ -2066,6 +2066,10 @@ func (m *appModel) AllBindings() []key.Binding {
 		))
 	}
 
+	// Queue a message for end-of-turn processing instead of steering it
+	// into the ongoing stream while the agent is working.
+	bindings = append(bindings, keys.EditorQueue)
+
 	if m.focusedPanel == PanelContent {
 		bindings = append(bindings, m.chatPage.Bindings()...)
 	} else {

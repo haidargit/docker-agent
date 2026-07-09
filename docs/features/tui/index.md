@@ -97,7 +97,7 @@ Type `/` during a session to see available commands, or press <kbd>Ctrl</kbd>+<k
 | `/speak`           | Voice input via system speech-to-text (macOS only)                                   |
 | `/exit`            | Exit the application (aliases: `/quit`, `/q`)                                        |
 
-Slash commands (both built-in and named) execute immediately when entered. Regular chat messages are queued and processed in order. This means you can invoke a slash command to interrupt or direct the agent even while it is mid-response.
+Slash commands (both built-in and named) execute immediately when entered. Regular chat messages sent while the agent is working are steered into the ongoing stream: the agent picks them up mid-turn (they appear in the transcript at the point the agent sees them) without breaking the stream. Press <kbd>Ctrl</kbd>+<kbd>Q</kbd> instead of <kbd>Enter</kbd> to queue a message for after the current turn; queued messages are processed in order once the stream stops.
 
 ### Agents Panel
 
@@ -280,6 +280,7 @@ Customize session titles to make them more meaningful and easier to find. By def
 | Ctrl+O     | Toggle hide tool results                        |
 | Ctrl+Z     | Suspend TUI to background (resume with `fg`)    |
 | Ctrl+X     | Clear queued messages                           |
+| Ctrl+Q     | Queue message for after the current turn (Enter steers it into the ongoing stream instead) |
 | Escape     | Cancel current operation                        |
 | Enter      | Send message (or newline with Shift+Enter)      |
 | Up/Down    | Navigate message history                        |
@@ -303,7 +304,7 @@ settings:
     - action: "commands"
       keys: ["f2", "ctrl+k"]
     - action: "quit"
-      keys: ["ctrl+q"]
+      keys: ["f10"]
 ```
 
 **Valid actions:**
@@ -312,6 +313,7 @@ settings:
 | -------------------------- | ------------ | -------------------------------------- |
 | `editor_send`              | `enter`      | Send the current message               |
 | `editor_newline`           | `ctrl+j`     | Insert a newline in the input          |
+| `editor_queue`             | `ctrl+q`     | Queue the message for after the current turn |
 | `quit`                     | `ctrl+c`     | Quit (opens the exit confirmation)     |
 | `switch_focus`             | `tab`        | Switch focus between panels            |
 | `commands`                 | `ctrl+k`     | Open the command palette               |

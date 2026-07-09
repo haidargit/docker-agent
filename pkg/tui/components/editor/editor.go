@@ -615,7 +615,9 @@ func (e *editor) ScrollByWheel(delta int) {
 
 // resetAndSend prepares a message for sending: processes pending file refs,
 // collects attachments, resets editor state, and returns the SendMsg command.
-func (e *editor) resetAndSend(content string) tea.Cmd {
+// queue marks the message for end-of-turn processing instead of mid-turn
+// steering when the agent is busy.
+func (e *editor) resetAndSend(content string, queue bool) tea.Cmd {
 	e.tryAddFileRef(e.pendingFileRef)
 	e.pendingFileRef = ""
 	attachments := e.collectAttachments(content)
@@ -644,7 +646,7 @@ func (e *editor) resetAndSend(content string) tea.Cmd {
 	e.textarea.Reset()
 	e.userTyped = false
 	e.clearSuggestion()
-	return core.CmdHandler(messages.SendMsg{Content: content, Attachments: finalAttachments})
+	return core.CmdHandler(messages.SendMsg{Content: content, Attachments: finalAttachments, Queue: queue})
 }
 
 // configureNewlineKeybinding sets up the newline keybinding from the
@@ -733,7 +735,7 @@ func (e *editor) Update(msg tea.Msg) (layout.Model, tea.Cmd) {
 			if idx >= 0 {
 				extraText = currentValue[idx+len(triggerWord):]
 			}
-			cmd := e.resetAndSend(msg.Value + extraText)
+			cmd := e.resetAndSend(msg.Value+extraText, false)
 			return e, cmd
 		}
 
@@ -814,6 +816,20 @@ func (e *editor) Update(msg tea.Msg) (layout.Model, tea.Cmd) {
 			return e.handleGraphemeBackspace()
 		}
 
+		// EditorQueue (ctrl+q by default): submit the current input as an
+		// explicitly queued message, held until the agent finishes its
+		// current turn instead of being steered into the ongoing stream.
+		if key.Matches(msg, core.GetKeys().EditorQueue) {
+			if !e.textarea.Focused() {
+				return e, nil
+			}
+			if value := e.textarea.Value(); value != "" {
+				cmd := e.resetAndSend(value, true)
+				return e, cmd
+			}
+			return e, nil
+		}
+
 		// Handle send/newline keys (both user-configurable, see issue #1626):
 		// - EditorSend (enter by default): submit the current input.
 		// - EditorNewline (ctrl+j by default) / shift+enter: insert a newline,
@@ -840,7 +856,7 @@ func (e *editor) Update(msg tea.Msg) (layout.Model, tea.Cmd) {
 				if prev != "" {
 					e.textarea.SetValue(prev)
 					e.textarea.MoveToEnd()
-					cmd := e.resetAndSend(prev)
+					cmd := e.resetAndSend(prev, false)
 					return e, cmd
 				}
 				return e, nil
@@ -848,7 +864,7 @@ func (e *editor) Update(msg tea.Msg) (layout.Model, tea.Cmd) {
 
 			// Normal send: send current value
 			if value != "" {
-				cmd := e.resetAndSend(value)
+				cmd := e.resetAndSend(value, false)
 				return e, cmd
 			}
 
@@ -1518,7 +1534,7 @@ func (e *editor) SendContent() tea.Cmd {
 	if value == "" {
 		return nil
 	}
-	return e.resetAndSend(value)
+	return e.resetAndSend(value, false)
 }
 
 func (e *editor) handlePaste(content string) bool {

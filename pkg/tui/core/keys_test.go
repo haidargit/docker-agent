@@ -21,13 +21,14 @@ func TestBuildKeys_Defaults(t *testing.T) {
 	assert.Equal(t, []string{"ctrl+r"}, keys.HistorySearch.Keys())
 	assert.Equal(t, []string{"enter"}, keys.EditorSend.Keys())
 	assert.Equal(t, []string{"ctrl+j"}, keys.EditorNewline.Keys())
+	assert.Equal(t, []string{"ctrl+q"}, keys.EditorQueue.Keys())
 }
 
 func TestBuildKeys_Overrides(t *testing.T) {
 	t.Parallel()
 	settings := &userconfig.Settings{
 		Keybindings: []userconfig.Keybinding{
-			{Action: "quit", Keys: []string{"ctrl+q"}},
+			{Action: "quit", Keys: []string{"f10"}},
 			{Action: "commands", Keys: []string{"f2", "ctrl+k"}},
 			{Action: "editor_newline", Keys: []string{"alt+enter"}},
 			{Action: "editor_send", Keys: []string{"ctrl+d"}},
@@ -37,13 +38,13 @@ func TestBuildKeys_Overrides(t *testing.T) {
 
 	keys := buildKeys(settings)
 
-	assert.Equal(t, []string{"ctrl+q"}, keys.Quit.Keys())
+	assert.Equal(t, []string{"f10"}, keys.Quit.Keys())
 	assert.Equal(t, []string{"f2", "ctrl+k"}, keys.Commands.Keys())
 	assert.Equal(t, []string{"alt+enter"}, keys.EditorNewline.Keys())
 	assert.Equal(t, []string{"ctrl+d"}, keys.EditorSend.Keys())
 
 	// The first override key drives the help label, capitalized for display.
-	assert.Equal(t, "Ctrl+q", keys.Quit.Help().Key)
+	assert.Equal(t, "F10", keys.Quit.Help().Key)
 
 	// Untouched actions keep their defaults.
 	assert.Equal(t, []string{"tab"}, keys.SwitchFocus.Keys())
@@ -71,22 +72,22 @@ func TestBuildKeys_MalformedKeysIgnored(t *testing.T) {
 	t.Parallel()
 	keys := buildKeys(&userconfig.Settings{
 		Keybindings: []userconfig.Keybinding{
-			{Action: "quit", Keys: []string{"ctrl+q", " ", "", "ctrl q"}},
+			{Action: "quit", Keys: []string{"f10", " ", "", "ctrl q"}},
 		},
 	})
 	// Only the well-formed key survives.
-	assert.Equal(t, []string{"ctrl+q"}, keys.Quit.Keys())
+	assert.Equal(t, []string{"f10"}, keys.Quit.Keys())
 }
 
 func TestBuildKeys_IntraConfigConflict(t *testing.T) {
 	t.Parallel()
 	keys := buildKeys(&userconfig.Settings{
 		Keybindings: []userconfig.Keybinding{
-			{Action: "quit", Keys: []string{"ctrl+q"}},
-			{Action: "suspend", Keys: []string{"ctrl+q"}}, // conflicts with quit, skipped
+			{Action: "quit", Keys: []string{"f10"}},
+			{Action: "suspend", Keys: []string{"f10"}}, // conflicts with quit, skipped
 		},
 	})
-	assert.Equal(t, []string{"ctrl+q"}, keys.Quit.Keys())
+	assert.Equal(t, []string{"f10"}, keys.Quit.Keys())
 	assert.Equal(t, []string{"ctrl+z"}, keys.Suspend.Keys()) // default preserved
 }
 
@@ -157,7 +158,7 @@ func TestBuildKeys_FromYAML(t *testing.T) {
 settings:
   keybindings:
     - action: "quit"
-      keys: ["ctrl+q"]
+      keys: ["f10"]
     - action: "editor_newline"
       keys: ["alt+enter"]
     - action: "history_search"
@@ -168,7 +169,7 @@ settings:
 
 	keys := buildKeys(config.Settings)
 
-	assert.Equal(t, []string{"ctrl+q"}, keys.Quit.Keys())
+	assert.Equal(t, []string{"f10"}, keys.Quit.Keys())
 	assert.Equal(t, []string{"alt+enter"}, keys.EditorNewline.Keys())
 	assert.Equal(t, []string{"ctrl+f"}, keys.HistorySearch.Keys())
 	assert.Equal(t, []string{"tab"}, keys.SwitchFocus.Keys())
@@ -192,6 +193,7 @@ func TestValidActions(t *testing.T) {
 	actions := ValidActions()
 	assert.Contains(t, actions, "editor_send")
 	assert.Contains(t, actions, "editor_newline")
+	assert.Contains(t, actions, "editor_queue")
 	assert.Contains(t, actions, "quit")
-	assert.Len(t, actions, 15)
+	assert.Len(t, actions, 16)
 }
