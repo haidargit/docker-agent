@@ -77,7 +77,7 @@ Type `/` during a session to see available commands, or press <kbd>Ctrl</kbd>+<k
 | `/sessions`        | Browse and load past sessions                                                        |
 | `/model`           | Change the model for the current agent                                               |
 | `/effort`          | Set the current model's reasoning-effort level (`/effort <none\|minimal\|low\|medium\|high\|xhigh\|max>`, or `/effort` alone to pick from the supported levels; reasoning models only) |
-| `/custom`          | Customize the TUI layout: sidebar position, section spacing, and visible sidebar sections |
+| `/settings`        | Open the settings dialog: layout visuals and message send behavior                  |
 | `/theme`           | Change the color theme                                                               |
 | `/yolo`            | Toggle automatic tool call approval                                                  |
 | `/title`           | Set or regenerate session title                                                      |
@@ -97,7 +97,7 @@ Type `/` during a session to see available commands, or press <kbd>Ctrl</kbd>+<k
 | `/speak`           | Voice input via system speech-to-text (macOS only)                                   |
 | `/exit`            | Exit the application (aliases: `/quit`, `/q`)                                        |
 
-Slash commands (both built-in and named) execute immediately when entered. Regular chat messages are queued and processed in order. This means you can invoke a slash command to interrupt or direct the agent even while it is mid-response.
+Slash commands (both built-in and named) execute immediately when entered. Regular chat messages sent while the agent is working are steered into the ongoing stream by default: the agent picks them up mid-turn (they appear in the transcript at the point the agent sees them) without breaking the stream. Prefer the previous end-of-turn behavior? Switch **While agent is working** to `Queue` on the **Behavior** tab of `/settings`; queued messages are processed in order once the stream stops.
 
 ### Agents Panel
 
@@ -334,19 +334,26 @@ Invalid entries are ignored with a warning (visible with `--debug`) so a bad con
 
 Press <kbd>Ctrl</kbd>+<kbd>R</kbd> to enter incremental history search mode. Start typing to filter through your previous inputs. Press <kbd>Enter</kbd> to select a match, or <kbd>Escape</kbd> to cancel.
 
-## Layout Customization
+## Settings
 
-Run `/custom` to open the layout dialog. It shows a live schematic preview of the resulting layout and applies every change immediately to the UI behind the dialog:
+Run `/settings` to open the settings dialog. Use <kbd>Tab</kbd> to switch between its two tabs, **Visuals** and **Behavior**.
+
+The **Visuals** tab customizes the layout. It shows a live schematic preview of the resulting layout and applies every change immediately to the UI behind the dialog:
 
 - **Sidebar position**: `Right` (default), `Left`, `Top`, or `Bottom`. Left/right keep the full vertical sidebar next to the chat; top/bottom render it as a compact horizontal band above or below the chat (session title, working directory, usage, plus a one-line summary of the current agent, tools, and todos).
 - **Section spacing**: `Compact`, `Normal` (default), or `Relaxed`, the number of blank lines between the sidebar sections (1, 2, or 3).
 - **Sidebar sections**: toggle the visibility of the **Token usage**, **Agents**, **Tools**, and **Todos** sections. The session block (title and working directory) is always shown.
+
+The **Behavior** tab controls how messages are handled:
+
+- **While agent is working**: `Steer` (default) attaches new messages to the ongoing stream so the agent picks them up mid-turn; `Queue` holds them until the current turn ends, processing them in order once the stream stops.
 
 Press <kbd>Enter</kbd> to apply and persist, or <kbd>Escape</kbd> to cancel and restore the previous layout. The settings are saved globally in `~/.config/cagent/config.yaml`:
 
 ```yaml
 # ~/.config/cagent/config.yaml
 settings:
+  busy_send_mode: queue # steer (default), queue
   layout:
     sidebar_position: left # right (default), left, top, bottom
     section_spacing: compact # normal (default), compact, relaxed

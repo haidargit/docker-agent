@@ -475,39 +475,7 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc, message string
 
 	go func() {
 		if len(attachments) > 0 {
-			// Build a single text string with the user's message and inlined text files.
-			// Keeping everything in one text block ensures the model sees file content
-			// together with the message, rather than as separate content blocks.
-			var textBuilder strings.Builder
-			textBuilder.WriteString(message)
-
-			// binaryParts holds non-text file parts (images, PDFs, etc.)
-			var binaryParts []chat.MessagePart
-
-			for _, att := range attachments {
-				switch {
-				case att.FilePath != "":
-					// File-reference attachment: read and classify from disk.
-					// Only remember the path on the session when the file actually
-					// exists as a regular file — we don't want sub-agents to inherit
-					// dangling references to directories or missing paths. The editor
-					// resolves @-mentions to absolute paths before this point.
-					if a.processFileAttachment(ctx, att, &textBuilder, &binaryParts) {
-						a.session.AddAttachedFile(att.FilePath)
-					}
-				case att.Content != "":
-					// Inline content attachment (e.g. pasted text).
-					a.processInlineAttachment(att, &textBuilder)
-				default:
-					slog.DebugContext(ctx, "skipping attachment with no file path or content", "name", att.Name)
-				}
-			}
-
-			multiContent := []chat.MessagePart{
-				{Type: chat.MessagePartTypeText, Text: textBuilder.String()},
-			}
-			multiContent = append(multiContent, binaryParts...)
-
+			multiContent := a.buildUserMultiContent(ctx, message, attachments)
 			a.session.AddMessage(session.UserMessage(message, multiContent...))
 		} else {
 			a.session.AddMessage(session.UserMessage(message))
@@ -533,6 +501,43 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc, message string
 			a.sendEvent(ctx, event)
 		}
 	}()
+}
+
+// buildUserMultiContent assembles the MultiContent parts for a user message
+// with attachments. It builds a single text string with the user's message
+// and inlined text files — keeping everything in one text block ensures the
+// model sees file content together with the message, rather than as separate
+// content blocks — followed by any binary parts (images, PDFs, …).
+func (a *App) buildUserMultiContent(ctx context.Context, message string, attachments []messages.Attachment) []chat.MessagePart {
+	var textBuilder strings.Builder
+	textBuilder.WriteString(message)
+
+	// binaryParts holds non-text file parts (images, PDFs, etc.)
+	var binaryParts []chat.MessagePart
+
+	for _, att := range attachments {
+		switch {
+		case att.FilePath != "":
+			// File-reference attachment: read and classify from disk.
+			// Only remember the path on the session when the file actually
+			// exists as a regular file — we don't want sub-agents to inherit
+			// dangling references to directories or missing paths. The editor
+			// resolves @-mentions to absolute paths before this point.
+			if a.processFileAttachment(ctx, att, &textBuilder, &binaryParts) {
+				a.session.AddAttachedFile(att.FilePath)
+			}
+		case att.Content != "":
+			// Inline content attachment (e.g. pasted text).
+			a.processInlineAttachment(att, &textBuilder)
+		default:
+			slog.DebugContext(ctx, "skipping attachment with no file path or content", "name", att.Name)
+		}
+	}
+
+	multiContent := []chat.MessagePart{
+		{Type: chat.MessagePartTypeText, Text: textBuilder.String()},
+	}
+	return append(multiContent, binaryParts...)
 }
 
 // processFileAttachment reads a file from disk, classifies it, and either
@@ -870,6 +875,18 @@ func (a *App) Resume(req runtime.ResumeRequest) {
 
 // Steer queues a user message for mid-turn injection into the running agent.
 func (a *App) Steer(ctx context.Context, msg runtime.QueuedMessage) error {
+	return a.runtime.Steer(ctx, msg)
+}
+
+// SteerMessage resolves attachments into message parts and queues the result
+// for mid-turn injection into the running agent. The runtime appends the
+// message to the session (and emits the matching UserMessageEvent) when the
+// agent loop drains it.
+func (a *App) SteerMessage(ctx context.Context, content string, attachments []messages.Attachment) error {
+	msg := runtime.QueuedMessage{Content: content}
+	if len(attachments) > 0 {
+		msg.MultiContent = a.buildUserMultiContent(ctx, content, attachments)
+	}
 	return a.runtime.Steer(ctx, msg)
 }
 

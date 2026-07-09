@@ -152,6 +152,9 @@ type Page interface {
 	// SetLayoutSettings applies layout customization (sidebar position,
 	// section spacing, and section visibility) and relayouts the page.
 	SetLayoutSettings(settings msgtypes.LayoutSettings) tea.Cmd
+	// SetSendMode sets what happens to messages sent while the agent is
+	// working: steer into the ongoing stream or queue until the turn ends.
+	SetSendMode(mode msgtypes.SendMode)
 }
 
 // queuedMessage represents a message waiting to be sent to the agent
@@ -178,6 +181,7 @@ type chatPage struct {
 	leanMode       bool
 	hideSidebar    bool
 	layoutSettings msgtypes.LayoutSettings
+	sendMode       msgtypes.SendMode
 
 	msgCancel       context.CancelFunc
 	streamCancelled bool
@@ -370,6 +374,14 @@ func WithLayoutSettings(settings msgtypes.LayoutSettings) PageOption {
 	}
 }
 
+// WithSendMode sets the initial behavior of messages sent while the agent
+// is working: steer into the ongoing stream or queue until the turn ends.
+func WithSendMode(mode msgtypes.SendMode) PageOption {
+	return func(p *chatPage) {
+		p.sendMode = mode
+	}
+}
+
 // sectionVisibility maps layout settings to the sidebar's visibility config.
 func sectionVisibility(settings msgtypes.LayoutSettings) sidebar.SectionVisibility {
 	return sidebar.SectionVisibility{
@@ -457,6 +469,20 @@ func (p *chatPage) Update(msg tea.Msg) (layout.Model, tea.Cmd) {
 	case msgtypes.SendMsg:
 		slog.Debug(msg.Content)
 		return p.handleSendMsg(msg)
+
+	case steerSentMsg:
+		return p, notification.InfoCmd("Message sent to the working agent · /settings to queue instead")
+
+	case steerFailedMsg:
+		// The steer queue rejected the message (full, or the stream just
+		// stopped). Fall back to the explicit queue path, which also runs
+		// the message immediately when the agent is no longer working.
+		msg.original.Queue = true
+		model, cmd := p.handleSendMsg(msg.original)
+		return model, tea.Batch(
+			notification.WarningCmd("Could not attach the message to the running stream"),
+			cmd,
+		)
 
 	case msgtypes.RetryMsg:
 		return p.handleRetry()
@@ -749,8 +775,9 @@ func (p *chatPage) parseImmediateCommand(content string) tea.Cmd {
 	return p.commandParser.Parse(content)
 }
 
-// handleSendMsg handles incoming messages from the editor, either processing
-// them immediately or queuing them if the agent is busy.
+// handleSendMsg handles incoming messages from the editor. Depending on
+// state they are processed immediately, steered into the ongoing stream, or
+// queued until the current turn ends.
 func (p *chatPage) handleSendMsg(msg msgtypes.SendMsg) (layout.Model, tea.Cmd) {
 	// Handle "exit", "quit", and ":q" as special keywords to quit the session
 	// immediately, equivalent to the /exit slash command.
@@ -787,9 +814,33 @@ func (p *chatPage) handleSendMsg(msg msgtypes.SendMsg) (layout.Model, tea.Cmd) {
 		return p, cmd
 	}
 
+	// While the agent is working, the configured send mode decides the
+	// default: steer injects the message into the ongoing stream so the
+	// agent picks it up mid-turn without breaking the stream (issue #3547);
+	// queue holds it until the turn ends. Queue-flagged messages (internal
+	// fallbacks) always queue, and so do fork-mode skills — they spawn
+	// their own stream, which cannot attach to the running one.
+	if msg.Queue || p.app == nil || p.sendMode == msgtypes.SendModeQueue || p.isForkSkillCommand(msg.Content) {
+		cmd := p.enqueueMessage(msg)
+		return p, cmd
+	}
+
+	cmd := p.steerMessage(msg)
+	return p, cmd
+}
+
+// isForkSkillCommand reports whether content invokes a fork-mode skill.
+func (p *chatPage) isForkSkillCommand(content string) bool {
+	_, _, ok := p.app.SkillCommandFork(p.ctx(), content)
+	return ok
+}
+
+// enqueueMessage appends the message to the local queue consumed when the
+// current stream stops, and reports the result to the user.
+func (p *chatPage) enqueueMessage(msg msgtypes.SendMsg) tea.Cmd {
 	// If queue is full, reject the message
 	if len(p.messageQueue) >= maxQueuedMessages {
-		return p, notification.WarningCmd(fmt.Sprintf("Queue full (max %d messages). Please wait.", maxQueuedMessages))
+		return notification.WarningCmd(fmt.Sprintf("Queue full (max %d messages). Please wait.", maxQueuedMessages))
 	}
 
 	// Add to queue
@@ -802,7 +853,32 @@ func (p *chatPage) handleSendMsg(msg msgtypes.SendMsg) (layout.Model, tea.Cmd) {
 	queueLen := len(p.messageQueue)
 	notifyMsg := fmt.Sprintf("Message queued (%d waiting) · Ctrl+X to clear", queueLen)
 
-	return p, notification.InfoCmd(notifyMsg)
+	return notification.InfoCmd(notifyMsg)
+}
+
+// steerSentMsg reports that a message was handed to the runtime's steer
+// queue; steerFailedMsg carries the message back for local queueing when
+// steering was rejected (e.g. steer queue full).
+type (
+	steerSentMsg   struct{}
+	steerFailedMsg struct{ original msgtypes.SendMsg }
+)
+
+// steerMessage injects the message into the ongoing stream via the runtime's
+// steer queue. Command resolution runs inside the command goroutine so slow
+// skill/agent command expansion never blocks the UI. The transcript bubble is
+// added when the runtime drains the message and emits its UserMessageEvent,
+// which is the moment the agent actually sees it.
+func (p *chatPage) steerMessage(msg msgtypes.SendMsg) tea.Cmd {
+	ctx := p.ctx()
+	return func() tea.Msg {
+		content := p.app.ResolveInput(ctx, msg.Content)
+		if err := p.app.SteerMessage(ctx, content, msg.Attachments); err != nil {
+			slog.Warn("Failed to steer message; falling back to queue", "error", err)
+			return steerFailedMsg{original: msg}
+		}
+		return steerSentMsg{}
+	}
 }
 
 func (p *chatPage) handleEditUserMessage(msg msgtypes.EditUserMessageMsg) (layout.Model, tea.Cmd) {
@@ -1111,6 +1187,11 @@ func (p *chatPage) SetLayoutSettings(settings msgtypes.LayoutSettings) tea.Cmd {
 		return nil
 	}
 	return p.SetSize(p.width, p.height)
+}
+
+// SetSendMode sets the behavior of messages sent while the agent is working.
+func (p *chatPage) SetSendMode(mode msgtypes.SendMode) {
+	p.sendMode = mode
 }
 
 // handleSidebarClickType checks what was clicked in the sidebar area.
