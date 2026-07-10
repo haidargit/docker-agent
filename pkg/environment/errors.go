@@ -14,7 +14,7 @@ const SecretsDocsURL = "https://docs.docker.com/ai/docker-agent/guides/secrets/"
 
 // ModelSetupDocsURL is the step-by-step tutorial for making a model available,
 // covering both the cloud API-key path and the local Docker Model Runner path.
-const ModelSetupDocsURL = "https://docs.docker.com/ai/docker-agent/getting-started/set-up-a-model/"
+const ModelSetupDocsURL = "https://docker.github.io/docker-agent/getting-started/set-up-a-model/"
 
 type RequiredEnvError struct {
 	Missing []string

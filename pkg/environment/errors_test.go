@@ -49,4 +49,8 @@ func TestRequiredEnvError_SuggestsLocalModelForModelCredentials(t *testing.T) {
 	assert.Contains(t, msg, "docker model ls")
 	assert.Contains(t, msg, "docker agent setup")
 	assert.Contains(t, msg, ModelSetupDocsURL)
+
+	// Pin the exact published URL so an accidental change to the constant
+	// (e.g. back to the dead docs.docker.com path) fails loudly.
+	assert.Contains(t, msg, "https://docker.github.io/docker-agent/getting-started/set-up-a-model/")
 }
