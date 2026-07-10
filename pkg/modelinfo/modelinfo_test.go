@@ -31,6 +31,12 @@ func TestSupportsResponsesAPI(t *testing.T) {
 		{"codex-mini", true},
 		{"gpt-5-codex", true},
 
+		// Provider-qualified ids (gateways/aggregators) match the bare name.
+		{"openai/gpt-5", true},
+		{"openai/o3-mini", true},
+		{"openrouter/openai/gpt-4.1", true},
+		{"openai/gpt-4o", false},
+
 		// Older models stay on Chat Completions.
 		{"gpt-4", false},
 		{"gpt-4o", false},
@@ -73,6 +79,13 @@ func TestUsesReasoningEffort(t *testing.T) {
 		{"gpt-5-turbo", true},
 		{"GPT-5", true},
 
+		// Provider-qualified ids (gateways/aggregators) match the bare name.
+		{"openai/gpt-5-nano", true},
+		{"openai/o3", true},
+		{"openrouter/openai/gpt-5", true},
+		{"openai/gpt-5-chat", false},
+		{"openai/gpt-4o", false},
+
 		// gpt-5-chat is a non-reasoning chat model.
 		{"gpt-5-chat", false},
 		{"gpt-5-chat-latest", false},
@@ -109,6 +122,9 @@ func TestAlwaysReasons(t *testing.T) {
 		{"o3", true},
 		{"o3-mini", true},
 		{"o4-mini", true},
+		// Provider-qualified ids (gateways/aggregators) match the bare name.
+		{"openai/o3-mini", true},
+		{"openai/gpt-5", false},
 		// gpt-5 can produce visible output without reasoning, so it is not
 		// classified as "always reasons".
 		{"gpt-5", false},
@@ -206,6 +222,10 @@ func TestSupportsAdaptiveThinking(t *testing.T) {
 		{"us.anthropic.claude-sonnet-4-6-v1:0", true},
 		{"global.anthropic.claude-sonnet-4-5-20250929-v1:0", false},
 		{"us.anthropic.claude-haiku-4-5-v1:0", false},
+		// Provider-qualified ids (gateways/aggregators) match the bare name.
+		{"anthropic/claude-opus-4.6", true},
+		{"openrouter/anthropic/claude-sonnet-4-6", true},
+		{"anthropic/claude-haiku-4-5", false},
 		// Case-insensitive and whitespace-tolerant.
 		{"CLAUDE-SONNET-4-6", true},
 		{"  claude-opus-4-8  ", true},
@@ -256,6 +276,7 @@ func TestUsesThinkingLevel(t *testing.T) {
 		"gemini-3.5-pro", "gemini-3.5-flash",
 		"GEMINI-3-PRO", // case-insensitive
 		"  gemini-3-pro  ",
+		"google/gemini-3-pro", // provider-qualified id
 	}
 	noMatch := []string{
 		"gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash",

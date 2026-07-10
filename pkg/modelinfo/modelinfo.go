@@ -293,9 +293,18 @@ func IsClaudeFamily(family string) bool {
 }
 
 // normalize returns the lowercased, whitespace-trimmed model identifier used
-// by every name-pattern predicate in this package.
+// by every name-pattern predicate in this package. Provider-qualified ids as
+// used by gateways and aggregators ("openai/gpt-5-nano" on OpenRouter,
+// "openrouter/openai/o3" in custom configs) are reduced to their last path
+// segment: the predicates match on the bare model name, and without this a
+// prefixed id would silently disable model-specific behavior (e.g. a
+// thinking_budget on "openai/gpt-5-nano" was never sent as reasoning_effort).
 func normalize(modelID string) string {
-	return strings.ToLower(strings.TrimSpace(modelID))
+	m := strings.ToLower(strings.TrimSpace(modelID))
+	if i := strings.LastIndexByte(m, '/'); i >= 0 {
+		m = m[i+1:]
+	}
+	return m
 }
 
 // isOSeries reports whether the (already-normalized) identifier names an
