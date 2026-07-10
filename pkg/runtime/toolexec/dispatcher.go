@@ -492,21 +492,31 @@ func (c *call) autoApprovalAfterConfirmationWait() (PermissionDecision, bool) {
 // takes effect. Deny/Ask patterns in the same layer are honored via
 // [permissions.Checker.CheckWithArgs] ordering (Deny > Allow > Ask), so a
 // session-level Deny or explicit Ask never yields an allow here.
+//
+// For the shell tool a matching allow pattern is necessary but not
+// sufficient: the generic matcher's trailing-* patterns are plain prefix
+// matches, so the "T = always allow mkdir*" grant would also cover
+// "mkdir x && rm -rf ~". Silencing a safety verdict demands the stricter
+// word-boundary, no-metacharacter reading — see shellGrantCoversCommand.
 func (c *call) sessionPermissionsAllow() bool {
 	c.d.approvalMu.Lock()
 	defer c.d.approvalMu.Unlock()
 	if c.sess.Permissions == nil {
 		return false
 	}
+	args := ParseToolInput(c.tc.Function.Arguments)
 	checker := permissions.NewCheckerFromRules(
 		c.sess.Permissions.Allow,
 		c.sess.Permissions.Ask,
 		c.sess.Permissions.Deny,
 	)
-	return checker.CheckWithArgs(
-		c.tc.Function.Name,
-		ParseToolInput(c.tc.Function.Arguments),
-	) == permissions.Allow
+	if checker.CheckWithArgs(c.tc.Function.Name, args) != permissions.Allow {
+		return false
+	}
+	if c.tc.Function.Name == shellToolName {
+		return shellGrantCoversCommand(c.sess.Permissions.Allow, args)
+	}
+	return true
 }
 
 func (c *call) cancellationMessage(ctx context.Context) string {

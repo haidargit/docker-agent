@@ -899,6 +899,60 @@ func TestDispatcher_PreToolUsePreYoloAskHonorsSessionAllow(t *testing.T) {
 	assert.Empty(t, em.confirmations, "an informed 'always allow' grant must not re-prompt")
 }
 
+// TestDispatcher_PreToolUsePreYoloAskSessionAllowRefusesCompound pins
+// the strict reading of the session grant on the safety-override path:
+// a "T = always allow mkdir*" grant is a plain prefix pattern in the
+// generic matcher and would also cover "mkdir x && rm -rf ~" — a
+// compound command that smuggles a destructive call behind the
+// approved word. Overriding a preempt-yolo Ask therefore requires the
+// word-boundary, no-metacharacter reading (shellGrantCoversCommand):
+// the compound call must still prompt.
+func TestDispatcher_PreToolUsePreYoloAskSessionAllowRefusesCompound(t *testing.T) {
+	t.Parallel()
+
+	a := newAgent()
+	sess := session.New()
+	sess.Permissions = &session.PermissionsConfig{Allow: []string{"shell:cmd=mkdir*"}}
+
+	tool := tools.Tool{
+		Name: "shell",
+		Handler: func(context.Context, tools.ToolCall, tools.Runtime) (*tools.ToolCallResult, error) {
+			panic("must not run: compound command must not be covered by the mkdir* grant")
+		},
+	}
+
+	hd := &stubHookDispatcher{
+		on: map[hooks.EventType]*hooks.Result{
+			hooks.EventPreToolUsePreYolo: {
+				Allowed:        true,
+				Decision:       hooks.DecisionAsk,
+				DecisionReason: "rm -rf <path>: irreversible",
+				Metadata:       map[string]string{"blast_radius": "high"},
+			},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	d := &toolexec.Dispatcher{
+		AgentFor: func(*session.Session) *agent.Agent { return a },
+		Hooks:    hd,
+	}
+	em := &captureEmitter{confirmed: make(chan struct{})}
+	go func() {
+		<-em.confirmed
+		cancel()
+	}()
+
+	d.Process(ctx, sess, []tools.ToolCall{{
+		ID:       "x",
+		Function: tools.FunctionCall{Name: "shell", Arguments: `{"cmd":"mkdir x && rm -rf ~"}`},
+	}}, []tools.Tool{tool}, em)
+
+	require.Len(t, em.confirmations, 1,
+		"a prefix grant must not silence the safety Ask for a compound command")
+}
+
 // TestDispatcher_PreToolUsePreYoloAskGuardsTeamAllow pins the boundary
 // of the fix: a matching allow pattern in the TEAM/config layer (the
 // dispatcher's Permissions checker, e.g. global settings or agent YAML)
